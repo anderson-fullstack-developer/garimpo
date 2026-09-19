@@ -16,7 +16,7 @@ from app.entitlements import entitlements_for
 from app.errors import ApiError
 from app.services.channels import ChannelError, get_channel
 from app.services.messages import RESET_BUTTON, reset_message_html, reset_message_plain
-from app.models import Destination, EmailToken, Invite, RefreshToken, User, UserSettings, new_id, utcnow
+from app.models import Destination, EmailToken, RefreshToken, User, UserSettings, new_id, utcnow
 from app.presenters import user_out
 from app.countries import COUNTRY_CODES, default_currency, default_language
 from app.ratelimit import email_limiter, login_failures, register_limiter
@@ -110,20 +110,6 @@ def _consume_email_token(db: Session, raw: str, kind: str) -> EmailToken:
     return token
 
 
-def _valid_invite(db: Session, code: str | None, email: str) -> Invite:
-    invite = (
-        db.scalar(select(Invite).where(Invite.code_hash == hash_token(code.strip()))) if code else None
-    )
-    if (
-        invite is None
-        or invite.used_at is not None
-        or invite.expires_at < utcnow()
-        or (invite.email and invite.email.lower() != email)
-    ):
-        raise ApiError(403, "VALIDATION_ERROR", "Invalid or expired invite")
-    return invite
-
-
 @router.post("/register", status_code=204, response_class=Response)
 def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)) -> Response:
     settings = get_settings()
@@ -135,7 +121,6 @@ def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)) 
         raise ApiError(422, "VALIDATION_ERROR", "Choose a less common password")
 
     email = body.email.lower()
-    invite = _valid_invite(db, body.invite_code, email) if settings.registration_mode == "INVITE" else None
 
     # Resposta idêntica exista ou não a conta: não revela quais e-mails estão cadastrados.
     if db.scalar(select(User).where(User.email == email)) is not None:
@@ -158,8 +143,6 @@ def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)) 
         start_trial(user)  # sem verificação, o teste começa no cadastro
     user.settings = UserSettings(interval_minutes=entitlements_for(user.plan).min_interval_minutes)
     db.add(user)
-    if invite:
-        invite.used_at = utcnow()
     db.commit()
     return Response(status_code=204)
 

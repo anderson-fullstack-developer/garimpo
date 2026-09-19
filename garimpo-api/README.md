@@ -84,7 +84,6 @@ mesma string. Os testes usam **só o schema isolado `garimpo_test`** (com trava 
 
 ```bash
 .venv/Scripts/python -m app.cli create-admin --email voce@exemplo.com     # pede a senha
-.venv/Scripts/python -m app.cli create-invite --days 7                     # modo INVITE
 .venv/Scripts/python -m app.cli approve --email usuario@exemplo.com        # modo APPROVAL
 .venv/Scripts/python -m app.cli bot-info | set-webhook --url ...
 ```

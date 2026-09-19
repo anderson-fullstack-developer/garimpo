@@ -167,22 +167,13 @@ def test_suspended_user_cannot_login(client, signup, session_factory):
     assert r.status_code == 403 and r.json()["code"] == "ACCOUNT_SUSPENDED"
 
 
-def test_invite_mode_requires_valid_code(client, settings, monkeypatch, session_factory):
-    from app.models import Invite, utcnow
-    from app.security import hash_token
+def test_sign_up_is_open_and_the_old_invite_setting_is_treated_as_open(client, settings, monkeypatch):
+    from app.config import Settings
 
-    monkeypatch.setattr(settings, "registration_mode", "INVITE")
+    assert Settings(registration_mode="INVITE").registration_mode == "OPEN"  # o valor antigo não derruba a API
     body = {"email": "cris@example.com", "password": PASSWORD, "captchaToken": "x"}
-    assert client.post("/auth/register", json=body).status_code == 403
-    assert client.post("/auth/register", json={**body, "inviteCode": "codigo-errado"}).status_code == 403
-
-    with session_factory() as db:
-        db.add(Invite(code_hash=hash_token("convite-valido"), expires_at=utcnow() + timedelta(days=1)))
-        db.commit()
-    assert client.post("/auth/register", json={**body, "inviteCode": "convite-valido"}).status_code == 204
-    # Convite de uso único.
-    other = {**body, "email": "dani@example.com", "inviteCode": "convite-valido"}
-    assert client.post("/auth/register", json=other).status_code == 403
+    assert client.post("/auth/register", json=body).status_code == 204  # sem código de convite
+    assert client.post("/auth/register", json={**body, "inviteCode": "qualquer"}).status_code == 204  # campo antigo é ignorado
 
 
 def test_change_password_and_delete_account(client, signup):

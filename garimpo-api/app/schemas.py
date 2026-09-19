@@ -36,14 +36,13 @@ class UserOut(CamelModel):
 
 
 class PublicConfigOut(CamelModel):
-    registration_mode: Literal["OPEN", "INVITE", "APPROVAL"]
+    registration_mode: Literal["OPEN", "APPROVAL"]
     bot_username: str
 
 
 class RegisterIn(CamelModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
-    invite_code: str | None = Field(default=None, max_length=100)
     country: str | None = Field(default=None, max_length=2)
     captcha_token: str = Field(default="", max_length=4000)
 

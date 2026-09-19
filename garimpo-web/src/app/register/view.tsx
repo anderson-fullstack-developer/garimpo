@@ -17,7 +17,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/components/states";
-import { usePublicConfig } from "@/hooks/useGarimpo";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/api/types";
 import { pt, t } from "@/i18n/pt";
@@ -36,7 +35,6 @@ import {
 function registerError(error: unknown): string {
   if (error instanceof ApiError && error.code === "VALIDATION_ERROR") {
     const message = error.message.toLowerCase();
-    if (message.includes("invite")) return pt.auth.inviteInvalid;
     if (message.includes("less common")) return pt.auth.weakPassword;
   }
   return errorMessage(error);
@@ -50,7 +48,6 @@ const makeSchema = () =>
       password: z.string().min(10, pt.auth.passwordRules),
       confirm: z.string(),
       country: z.string().min(1, pt.auth.countryPlaceholder),
-      inviteCode: z.string().optional(),
       terms: z.boolean().refine((v) => v, pt.auth.mustAcceptTerms),
     })
     .refine((data) => data.password === data.confirm, {
@@ -60,7 +57,6 @@ const makeSchema = () =>
 type FormValues = z.infer<ReturnType<typeof makeSchema>>;
 
 export function RegisterPage() {
-  const { data: config } = usePublicConfig();
   const [captchaToken, setCaptchaToken] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -71,7 +67,6 @@ export function RegisterPage() {
       password: "",
       confirm: "",
       country: "",
-      inviteCode: "",
       terms: false,
     },
   });
@@ -88,7 +83,6 @@ export function RegisterPage() {
       await api.auth.register({
         email: values.email.trim().toLowerCase(),
         password: values.password,
-        inviteCode: values.inviteCode || undefined,
         country: values.country,
         captchaToken,
       });
@@ -169,13 +163,6 @@ export function RegisterPage() {
             <p className="text-xs text-destructive">{form.formState.errors.country.message}</p>
           ) : null}
         </div>
-
-        {config?.registrationMode === "INVITE" ? (
-          <div className="space-y-2">
-            <Label htmlFor="inviteCode">{pt.auth.inviteCode}</Label>
-            <Input id="inviteCode" {...form.register("inviteCode")} />
-          </div>
-        ) : null}
 
         <CaptchaBox onToken={onToken} />
 

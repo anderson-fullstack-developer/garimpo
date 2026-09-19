@@ -10,7 +10,6 @@ from app.models import (
     Alert,
     Destination,
     EmailToken,
-    Invite,
     Item,
     Match,
     MonitorRun,
@@ -52,7 +51,6 @@ def test_prune_removes_only_what_is_old(client, signup, session_factory):
             Destination(user_id=uid, kind="GROUP", code_hash="x2", code_expires_at=utcnow() + timedelta(minutes=5)),  # ainda válido
             Destination(user_id=uid, kind="GROUP", external_id="-1", linked_at=days(90)),  # vinculado: nunca sai
         ])  # fmt: skip
-        db.add_all([Invite(code_hash="i" * 64, expires_at=days(40)), Invite(code_hash="j" * 64, expires_at=days(1))])
 
         old = Item(vinted_id=1, title="velho", price=10, seller_login="#1", url="u", last_seen_at=days(31))
         fresh = Item(vinted_id=2, title="novo", price=10, seller_login="#2", url="u", last_seen_at=days(1))
@@ -65,7 +63,7 @@ def test_prune_removes_only_what_is_old(client, signup, session_factory):
     with session_factory() as db:
         counts = prune(db)
     assert counts == {
-        "monitor_runs": 1, "email_tokens": 1, "refresh_tokens": 2, "destinations_pending": 1, "invites": 1, "items": 1,
+        "monitor_runs": 1, "email_tokens": 1, "refresh_tokens": 2, "destinations_pending": 1, "items": 1,
     }  # fmt: skip
 
     with session_factory() as db:
@@ -75,7 +73,6 @@ def test_prune_removes_only_what_is_old(client, signup, session_factory):
         assert {t.family_id for t in db.scalars(select(RefreshToken)) if t.family_id in ("f1", "f2", "f3")} == {"f3"}
         assert {d.code_hash for d in db.scalars(select(Destination)) if d.code_hash} == {"x2"}
         assert len(db.scalars(select(Destination)).all()) == 2  # o vinculado e o pendente válido
-        assert [i.code_hash for i in db.scalars(select(Invite))] == ["j" * 64]
         # o anúncio antigo levou junto casamento, aviso e histórico de preço (cascata); o novo ficou inteiro
         assert [i.title for i in db.scalars(select(Item))] == ["novo"]
         assert len(db.scalars(select(Match)).all()) == 1 and len(db.scalars(select(Notification)).all()) == 1

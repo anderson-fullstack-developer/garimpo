@@ -121,19 +121,6 @@ class EmailToken(Base):
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
-class Invite(Base):
-    __tablename__ = "invites"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    created_by: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
-    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
-
-
 class UserSettings(Base):
     __tablename__ = "settings"
 

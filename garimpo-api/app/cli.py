@@ -1,7 +1,6 @@
 """Comandos de administração:
 
     python -m app.cli create-admin --email voce@exemplo.com
-    python -m app.cli create-invite --days 7 [--email amigo@exemplo.com]
     python -m app.cli approve --email usuario@exemplo.com
     python -m app.cli bot-info                       # confere o token do bot
     python -m app.cli set-webhook --url https://SUA-API/webhooks/telegram
@@ -19,7 +18,7 @@ from sqlalchemy import select
 from app import models  # noqa: F401
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
-from app.models import Invite, User, UserSettings, utcnow
+from app.models import User, UserSettings, utcnow
 from app.security import hash_password, hash_token, is_weak_password, new_token
 
 
@@ -51,20 +50,6 @@ def create_admin(email: str, password: str | None) -> None:
             db.add(user)
         db.commit()
     print(f"Administrador pronto: {email}")
-
-
-def create_invite(days: int, email: str | None) -> None:
-    code = new_token(12)
-    with SessionLocal() as db:
-        db.add(
-            Invite(
-                code_hash=hash_token(code),
-                email=email.lower() if email else None,
-                expires_at=utcnow() + timedelta(days=days),
-            )
-        )
-        db.commit()
-    print(f"Código de convite (guarde agora, não é possível ver de novo): {code}")
 
 
 def approve(email: str) -> None:
@@ -171,10 +156,6 @@ def main() -> None:
     p_admin.add_argument("--email", required=True)
     p_admin.add_argument("--password", help="(evite: fica no histórico do terminal)")
 
-    p_invite = sub.add_parser("create-invite")
-    p_invite.add_argument("--days", type=int, default=7)
-    p_invite.add_argument("--email")
-
     p_approve = sub.add_parser("approve")
     p_approve.add_argument("--email", required=True)
 
@@ -197,8 +178,6 @@ def main() -> None:
         set_webhook(args.url)
     elif args.command == "create-admin":
         create_admin(args.email, args.password)
-    elif args.command == "create-invite":
-        create_invite(args.days, args.email)
     else:
         approve(args.email)
 

@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3200"]
     trust_proxy: bool = False
 
-    registration_mode: Literal["OPEN", "INVITE", "APPROVAL"] = "APPROVAL"
+    # OPEN = qualquer pessoa cria conta; APPROVAL = você aprova cada uma. (Não há mais cadastro por convite.)
+    registration_mode: Literal["OPEN", "APPROVAL"] = "OPEN"
     # A conta só é liberada depois de vincular um chat PRIVADO do Telegram (não há verificação por e-mail).
     require_verification: bool = True
     default_plan: Literal["FREE", "PRO", "ELITE"] = "PRO"
@@ -60,6 +61,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_bot_username: str = "GarimpoAlertasBot"
     telegram_webhook_secret: str | None = None
+
+    @field_validator("registration_mode", mode="before")
+    @classmethod
+    def _legacy_invite_is_open(cls, value: object) -> object:
+        return "OPEN" if isinstance(value, str) and value.strip().upper() == "INVITE" else value
 
     @field_validator(
         "cookie_domain",

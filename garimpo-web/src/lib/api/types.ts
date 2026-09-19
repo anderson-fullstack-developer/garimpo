@@ -30,7 +30,7 @@ export interface User {
 }
 
 export interface PublicConfig {
-  registrationMode: "OPEN" | "INVITE" | "APPROVAL";
+  registrationMode: "OPEN" | "APPROVAL";
   botUsername: string;
 }
 
@@ -244,7 +244,6 @@ export interface Api {
     register(input: {
       email: string;
       password: string;
-      inviteCode?: string | undefined;
       country?: string | undefined;
       captchaToken: string;
     }): Promise<void>;

@@ -7,7 +7,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Destination, EmailToken, Invite, Item, MonitorRun, RefreshToken, utcnow
+from app.models import Destination, EmailToken, Item, MonitorRun, RefreshToken, utcnow
 
 log = logging.getLogger("garimpo.maintenance")
 
@@ -30,7 +30,6 @@ def prune(db: Session, now: datetime | None = None) -> dict[str, int]:
         "destinations_pending": delete(Destination).where(
             Destination.linked_at.is_(None), Destination.code_expires_at < now - PENDING_LINK_KEEP
         ),
-        "invites": delete(Invite).where(Invite.expires_at < now - REVOKED_SESSIONS_KEEP),
         # Anúncios: as tabelas ligadas (casamentos, avisos, histórico de preço) saem junto, em cascata.
         "items": delete(Item).where(Item.last_seen_at < now - retention),
     }
