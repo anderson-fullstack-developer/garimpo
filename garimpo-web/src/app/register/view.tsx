@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/components/states";
 import { usePublicConfig } from "@/hooks/useGarimpo";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/api/types";
 import { pt, t } from "@/i18n/pt";
 import { APP_NAME } from "@/config/brand";
 import { COUNTRIES, countryLabel } from "@/config/countries";
@@ -30,6 +31,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+/** O servidor responde "validação" para vários motivos; aqui o usuário vê o motivo de verdade. */
+function registerError(error: unknown): string {
+  if (error instanceof ApiError && error.code === "VALIDATION_ERROR") {
+    const message = error.message.toLowerCase();
+    if (message.includes("invite")) return pt.auth.inviteInvalid;
+    if (message.includes("less common")) return pt.auth.weakPassword;
+  }
+  return errorMessage(error);
+}
 
 // Função (e não constante): os textos precisam sair no idioma atual, que muda depois do carregamento.
 const makeSchema = () =>
@@ -82,7 +93,7 @@ export function RegisterPage() {
         captchaToken,
       });
     } catch (error) {
-      setFormError(errorMessage(error));
+      setFormError(registerError(error));
       return;
     }
     // Sem e-mail para confirmar: entra direto e o passo seguinte é ligar o Telegram.

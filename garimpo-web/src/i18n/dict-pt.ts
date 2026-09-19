@@ -98,6 +98,9 @@ export const ptDict = {
     forgotSentTelegram:
       "Se a conta existir e tiver um chat privado do Telegram conectado, enviamos o link por lá (vale 15 minutos). Não chegou? Tente por e-mail.",
     forgotTelegramHint: "O link chega no chat privado do bot que você conectou ao app.",
+    inviteInvalid:
+      "Código de convite inválido, expirado ou já usado. Confira se copiou inteiro, sem espaços.",
+    weakPassword: "Escolha uma senha menos comum.",
     registerLoginHint:
       "Se o e-mail estava livre, a conta foi criada. Entre com o e-mail e a senha.",
     resetTitle: "Definir nova senha",

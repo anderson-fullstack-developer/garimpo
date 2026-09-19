@@ -99,6 +99,9 @@ export const enDict: Messages = {
     forgotViaEmail: "Receive by email",
     forgotSentTelegram:
       "If the account exists and has a private Telegram chat connected, we sent the link there (valid for 15 minutes). Didn't arrive? Try email.",
+    inviteInvalid:
+      "Invite code is invalid, expired or already used. Check that you copied it whole, without spaces.",
+    weakPassword: "Choose a less common password.",
     registerLoginHint:
       "If the email was free, the account was created. Log in with your email and password.",
     forgotTelegramHint:
