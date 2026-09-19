@@ -11,6 +11,7 @@ from app.models import Destination
 from app.services.messages import tr
 from app.services.channels import (
     AlertMessage,
+    MessageItem,
     ChannelNotConfigured,
     PermanentChannelError,
     TransientChannelError,
