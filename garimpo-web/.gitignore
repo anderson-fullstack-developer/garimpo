@@ -1,0 +1,23 @@
+# dependências e build
+node_modules
+.next
+.next-*
+out
+build
+*.tsbuildinfo
+next-env.d.ts
+
+# logs
+*.log
+npm-debug.log*
+
+# variáveis de ambiente (só o .env.example é versionado)
+.env
+.env.*
+!.env.example
+
+# editor / SO
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
