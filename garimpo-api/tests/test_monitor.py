@@ -520,3 +520,18 @@ def test_new_listings_get_an_estimated_posting_time_from_the_id_clock(session_fa
         assert timedelta(minutes=4) < utcnow() - recent.posted_at < timedelta(minutes=6)  # ~5 min atrás
         assert old.posted_at is None  # velho demais para estimar: melhor não mostrar
     idclock.clock.reset()
+
+
+def test_continuous_search_also_alerts_on_telegram_and_never_repeats(client, signup, link_destination, fake_source, fake_channel):
+    """Quem deixa o "Buscar" rodando espera o aviso no Telegram (antes ele só marcava como visto)."""
+    setup_user(client, signup, link_destination)
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12 velho", 80)])
+    assert run_search(client)["state"] == "done"  # 1ª busca: só registra o que já existe (baseline)
+    assert fake_channel.sent == []
+
+    fake_source.put("iphone 12", [make_raw(2, "iPhone 12 chegou agora", 70), make_raw(1, "iPhone 12 velho", 80)])
+    assert run_search(client)["newItems"] == 1
+    assert sent_titles(fake_channel) == [["iPhone 12 chegou agora"]]  # chegou no Telegram
+
+    run_search(client)  # de novo, sem nada novo: não repete
+    assert sent_titles(fake_channel) == [["iPhone 12 chegou agora"]]

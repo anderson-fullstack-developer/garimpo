@@ -169,12 +169,15 @@ engine = MonitorEngine()
 
 # ---------------------------------------------------------------- busca manual ("Buscar agora")
 def run_user_search(db: Session, user: User, source: ItemSource | None = None) -> RunSummary:
-    """Busca os alertas ativos do usuário agora. O que achar aparece em Resultados; não vai para o
-    Telegram (o usuário já está vendo na tela), então é marcado como visto."""
+    """Busca os alertas ativos do usuário agora. O que achar aparece em Resultados E é avisado no Telegram,
+    como faz o monitor (o "Buscar" contínuo é o próprio monitor enquanto a tela está ligada). O que já foi
+    avisado não se repete: `Notification` é única por (usuário, anúncio)."""
     alerts = list(db.scalars(select(Alert).where(Alert.user_id == user.id, Alert.active.is_(True))))
     if not alerts:
         return RunSummary()
-    summary = run_alerts(db, source or get_source(), alerts, silent_reason="manual")
+    summary = run_alerts(db, source or get_source(), alerts)
+    summary.sent, notify_errors = notify_outcomes(db, summary.outcomes)
+    summary.errors.extend(notify_errors)
     db.commit()
     return summary
 

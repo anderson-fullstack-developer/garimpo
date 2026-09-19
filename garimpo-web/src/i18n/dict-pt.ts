@@ -283,7 +283,8 @@ export const ptDict = {
     viewResults: "Ver resultados",
     monitorTitle: "Monitor automático",
     monitorOnText: "Ligado: avisamos no Telegram assim que aparecer um anúncio novo.",
-    monitorOffText: "Desligado: nada é enviado sozinho. Use “Buscar agora” para testar.",
+    monitorOffText:
+      "Desligado: sem o monitor, só avisamos enquanto a busca estiver rodando (botão “Buscar agora”). Ligue para receber sempre.",
     lastCheck: "Última verificação {when}",
     telegramConnected: "Avisos vão para {name}",
     telegramNone: "Telegram não conectado",

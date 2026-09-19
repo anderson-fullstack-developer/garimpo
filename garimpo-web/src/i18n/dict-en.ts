@@ -286,7 +286,8 @@ export const enDict: Messages = {
     viewResults: "View results",
     monitorTitle: "Automatic monitor",
     monitorOnText: "On: we notify you on Telegram as soon as a new listing appears.",
-    monitorOffText: "Off: nothing is sent on its own. Use “Search now” to try it out.",
+    monitorOffText:
+      "Off: without the monitor, we only alert you while a search is running (“Search now”). Turn it on to always be alerted.",
     lastCheck: "Last check {when}",
     telegramConnected: "Alerts go to {name}",
     telegramNone: "Telegram not connected",
