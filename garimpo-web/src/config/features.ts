@@ -6,7 +6,7 @@ export const FEATURES = {
   /** Planos, limites visíveis, cobrança e "Fazer upgrade". */
   billing: false,
   /** Painel de administração (usuários, convites, execuções). */
-  admin: false,
+  admin: true,
   /** Gráfico de histórico de preços. */
   history: false,
   /** Página dedicada do monitor (o liga/desliga já fica na tela de Alertas). */

@@ -17,9 +17,8 @@ export const qk = {
   subscription: ["billing", "subscription"] as const,
   usage: ["billing", "usage"] as const,
   adminUsers: (q?: string) => ["admin", "users", q ?? ""] as const,
-  adminInvites: ["admin", "invites"] as const,
   adminRuns: (status?: string) => ["admin", "runs", status ?? ""] as const,
-  adminStats: ["admin", "stats"] as const,
+  adminOverview: ["admin", "overview"] as const,
 };
 
 export const usePublicConfig = () =>

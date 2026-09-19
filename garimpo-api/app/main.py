@@ -9,7 +9,7 @@ from app import models  # noqa: F401  (registra as tabelas no metadata)
 from app.config import get_settings
 from app.db import Base, engine
 from app.errors import install_error_handlers
-from app.routers import alerts, auth, billing, destinations, items, me, monitor, public, search, webhooks
+from app.routers import admin, alerts, auth, billing, destinations, items, me, monitor, public, search, webhooks
 from app.services.channels import get_channel, register_channel
 from app.services.monitor import engine as monitor_engine
 from app.services.telegram import TelegramChannel
@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
         allow_headers=["content-type"],
     )
     install_error_handlers(app)
-    for router in (public.router, auth.router, me.router, alerts.router, destinations.router, monitor.router, items.router, search.router, billing.router, webhooks.router):
+    for router in (public.router, auth.router, me.router, alerts.router, destinations.router, monitor.router, items.router, search.router, billing.router, admin.router, webhooks.router):
         app.include_router(router)
     return app
 

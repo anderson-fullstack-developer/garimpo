@@ -1,10 +1,8 @@
 import type {
-  AdminUser,
   Alert,
   Destination,
   ExcludePreset,
   ExcludePresetInfo,
-  Invite,
   Item,
   ItemCondition,
   MonitorRun,
@@ -318,51 +316,6 @@ export const seedSubscription: Subscription = {
   currentPeriodEnd: nowIso(1000 * 60 * 60 * 24 * 12),
   cancelAtPeriodEnd: false,
 };
-
-export const seedAdminUsers: AdminUser[] = [
-  ...seedUsers.map(({ password: _password, ...u }) => u),
-  {
-    id: "u_3",
-    email: "carla@exemplo.com",
-    role: "USER",
-    plan: "PRO",
-    status: "ACTIVE",
-    createdAt: nowIso(-1000 * 60 * 60 * 24 * 14),
-  },
-  {
-    id: "u_4",
-    email: "pedro@exemplo.com",
-    role: "USER",
-    plan: "FREE",
-    status: "PENDING",
-    createdAt: nowIso(-1000 * 60 * 60 * 20),
-  },
-  {
-    id: "u_5",
-    email: "ines@exemplo.com",
-    role: "USER",
-    plan: "ELITE",
-    status: "SUSPENDED",
-    createdAt: nowIso(-1000 * 60 * 60 * 24 * 60),
-  },
-];
-
-export const seedInvites: Invite[] = [
-  {
-    id: "inv_1",
-    code: "GARIMPO-7K4D",
-    email: null,
-    expiresAt: nowIso(1000 * 60 * 60 * 24 * 5),
-    usedAt: null,
-  },
-  {
-    id: "inv_2",
-    code: "GARIMPO-9XQ2",
-    email: "amigo@exemplo.com",
-    expiresAt: nowIso(-1000 * 60 * 60 * 24),
-    usedAt: nowIso(-1000 * 60 * 60 * 30),
-  },
-];
 
 export function presetWords(presets: ExcludePreset[]): string[] {
   return presets.flatMap((p) => PRESETS.find((x) => x.id === p)?.words ?? []);

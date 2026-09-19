@@ -4,11 +4,11 @@ import type {
   Alert,
   AlertInput,
   Api,
-  BusinessStats,
+  AdminOverview,
+  AdminRun,
   ChannelInfo,
   Destination,
   ExcludePresetInfo,
-  Invite,
   ItemPage,
   ItemQuery,
   LinkCode,
@@ -196,14 +196,12 @@ export const httpApi: Api = {
     createPortal: () => request<{ url: string }>("/billing/portal", { method: "POST" }),
   },
   admin: {
+    overview: () => request<AdminOverview>("/admin/overview"),
     users: (params) => request<AdminUser[]>("/admin/users", { query: params }),
-    updateUser: (id, patch) =>
-      request<AdminUser>(`/admin/users/${id}`, { method: "PATCH", body: patch }),
-    invites: () => request<Invite[]>("/admin/invites"),
-    createInvite: (input) => request<Invite>("/admin/invites", { method: "POST", body: input }),
-    revokeInvite: (id) => request<void>(`/admin/invites/${id}`, { method: "DELETE" }),
-    runs: (params?: { status?: string }) => request<MonitorRun[]>("/admin/runs", { query: params }),
-    stats: () => request<BusinessStats>("/admin/stats"),
+    updateUser: (id, input) =>
+      request<AdminUser>(`/admin/users/${id}`, { method: "PATCH", body: input }),
+    deleteUser: (id) => request<void>(`/admin/users/${id}`, { method: "DELETE" }),
+    runs: (params) => request<AdminRun[]>("/admin/runs", { query: params }),
   },
 };
 

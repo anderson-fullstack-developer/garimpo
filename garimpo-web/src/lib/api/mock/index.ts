@@ -4,10 +4,10 @@ import type {
   Alert,
   AlertInput,
   Api,
-  BusinessStats,
+  AdminOverview,
+  AdminRun,
   ChannelInfo,
   Destination,
-  Invite,
   Item,
   ItemPage,
   ItemQuery,
@@ -30,10 +30,8 @@ import {
   makeItem,
   nextId,
   presetWords,
-  seedAdminUsers,
   seedAlerts,
   seedDestinations,
-  seedInvites,
   seedItems,
   seedMonitor,
   seedSettings,
@@ -51,8 +49,6 @@ interface MockState {
   settings: Settings;
   monitor: MonitorStatus;
   subscription: Subscription;
-  adminUsers: AdminUser[];
-  invites: Invite[];
   registrationMode: PublicConfig["registrationMode"];
 }
 
@@ -74,8 +70,6 @@ function freshState(): MockState {
     settings: { ...seedSettings },
     monitor: { ...seedMonitor },
     subscription: { ...seedSubscription },
-    adminUsers: seedAdminUsers.map((u) => ({ ...u })),
-    invites: seedInvites.map((i) => ({ ...i })),
     registrationMode: "OPEN",
   };
 }
@@ -258,7 +252,6 @@ export const mockApi: Api = {
           currency: "EUR",
         };
         state.users.push(user);
-        state.adminUsers.push(publicUser(user));
       }, 0),
     login: ({ email, password }) =>
       respond<User>(() => {
@@ -596,50 +589,51 @@ export const mockApi: Api = {
   },
 
   admin: {
-    users: (params) =>
-      respond<AdminUser[]>(() => {
-        let list = state.adminUsers.map((u) => ({ ...u }));
-        if (params?.q) list = list.filter((u) => u.email.includes(params.q!.toLowerCase()));
-        if (params?.status) list = list.filter((u) => u.status === params.status);
-        return list;
+    overview: () =>
+      respond<AdminOverview>({
+        users: 3,
+        newThisWeek: 2,
+        verified: 3,
+        unverified: 0,
+        inTrial: 1,
+        paid: 1,
+        expired: 0,
+        suspended: 0,
+        alerts: 4,
+        destinations: 3,
+        items: 1200,
+        monitorOn: 2,
+        runsLastDay: 480,
+        runErrorsLastDay: 2,
       }),
-    updateUser: (id, patch) =>
-      respond<AdminUser>(() => {
-        const user = state.adminUsers.find((u) => u.id === id);
-        if (!user) throw new ApiError(404, "NOT_FOUND", "Usuário não encontrado");
-        Object.assign(user, patch);
-        return { ...user };
-      }, 0),
-    invites: () => respond<Invite[]>(() => state.invites.map((i) => ({ ...i }))),
-    createInvite: ({ email, expiresInDays }) =>
-      respond<Invite>(() => {
-        const invite: Invite = {
-          id: nextId("inv"),
-          code: `GARIMPO-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-          email: email ?? null,
-          expiresAt: new Date(Date.now() + expiresInDays * 86400e3).toISOString(),
-          usedAt: null,
-        };
-        state.invites.unshift(invite);
-        return { ...invite };
-      }, 0),
-    revokeInvite: (id) =>
-      respond<void>(() => {
-        state.invites = state.invites.filter((i) => i.id !== id);
-      }, 0),
-    runs: (params?: { status?: string }) =>
-      respond<MonitorRun[]>(() => {
-        const list = state.monitor.runs.map((r) => ({ ...r }));
-        return params?.status ? list.filter((r) => r.status === params.status) : list;
-      }),
-    stats: () =>
-      respond<BusinessStats>({
-        usersByPlan: { FREE: 128, PRO: 46, ELITE: 12 },
-        mrr: 46 * 19 + 12 * 49,
-        detectionP50Seconds: 42,
-        detectionP95Seconds: 128,
-        errorRatePct: 1.8,
-      }),
+    users: () =>
+      respond<AdminUser[]>(() => [
+        {
+          id: "u_demo",
+          email: "demo@garimpo.app",
+          role: "ADMIN",
+          status: "ACTIVE",
+          country: "pt",
+          language: "pt",
+          currency: "EUR",
+          verified: true,
+          createdAt: new Date(Date.now() - 5 * 86400e3).toISOString(),
+          lastLoginAt: new Date().toISOString(),
+          trialEndsAt: null,
+          subscriptionStatus: "active",
+          stripeCustomer: false,
+          hasAccess: true,
+          access: "admin",
+          alerts: 2,
+          destinations: 1,
+          monitorEnabled: true,
+        },
+      ]),
+    updateUser: () =>
+      Promise.reject(new ApiError(400, "VALIDATION_ERROR", "Indisponível no modo demonstração")),
+    deleteUser: () =>
+      Promise.reject(new ApiError(400, "VALIDATION_ERROR", "Indisponível no modo demonstração")),
+    runs: () => respond<AdminRun[]>([]),
   },
 };
 

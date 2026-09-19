@@ -183,30 +183,66 @@ export interface Usage {
   destinations: number;
 }
 
+export type AdminAccess = "admin" | "paid" | "trial" | "expired" | "unverified";
+
 export interface AdminUser {
   id: string;
   email: string;
   role: Role;
-  plan: Plan;
   status: UserStatus;
+  country: string | null;
+  language: string;
+  currency: string;
+  verified: boolean;
   createdAt: string;
+  lastLoginAt: string | null;
+  trialEndsAt: string | null;
+  subscriptionStatus: string | null;
+  stripeCustomer: boolean;
+  hasAccess: boolean;
+  access: AdminAccess;
+  alerts: number;
+  destinations: number;
+  monitorEnabled: boolean;
 }
 
-export interface Invite {
+export interface AdminOverview {
+  users: number;
+  newThisWeek: number;
+  verified: number;
+  unverified: number;
+  inTrial: number;
+  paid: number;
+  expired: number;
+  suspended: number;
+  alerts: number;
+  destinations: number;
+  items: number;
+  monitorOn: number;
+  runsLastDay: number;
+  runErrorsLastDay: number;
+}
+
+export interface AdminRun {
   id: string;
-  code: string;
-  email: string | null;
-  expiresAt: string;
-  usedAt: string | null;
+  searchKey: string;
+  startedAt: string;
+  durationMs: number;
+  status: string;
+  analyzed: number;
+  matches: number;
+  error: string | null;
 }
 
-export interface BusinessStats {
-  usersByPlan: Record<Plan, number>;
-  mrr: number;
-  detectionP50Seconds: number;
-  detectionP95Seconds: number;
-  errorRatePct: number;
-}
+export type AdminAction =
+  | "grant_access"
+  | "revoke_access"
+  | "extend_trial"
+  | "end_trial"
+  | "suspend"
+  | "reactivate"
+  | "make_admin"
+  | "remove_admin";
 
 export type ApiErrorCode =
   | "INVALID_CREDENTIALS"
@@ -321,19 +357,11 @@ export interface Api {
     createPortal(): Promise<{ url: string }>;
   };
   admin: {
-    users(params?: {
-      q?: string | undefined;
-      status?: UserStatus | undefined;
-    }): Promise<AdminUser[]>;
-    updateUser(
-      id: string,
-      patch: { status?: UserStatus | undefined; plan?: Plan | undefined },
-    ): Promise<AdminUser>;
-    invites(): Promise<Invite[]>;
-    createInvite(input: { email?: string | undefined; expiresInDays: number }): Promise<Invite>;
-    revokeInvite(id: string): Promise<void>;
-    runs(params?: { status?: string | undefined }): Promise<MonitorRun[]>;
-    stats(): Promise<BusinessStats>;
+    overview(): Promise<AdminOverview>;
+    users(params?: { q?: string | undefined; access?: string | undefined }): Promise<AdminUser[]>;
+    updateUser(id: string, input: { action: AdminAction; days?: number }): Promise<AdminUser>;
+    deleteUser(id: string): Promise<void>;
+    runs(params?: { status?: string | undefined }): Promise<AdminRun[]>;
   };
 }
 

@@ -3,12 +3,26 @@
 import { notFound } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -18,60 +32,152 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { ErrorState, LoadingList, PageHeader, errorMessage } from "@/components/states";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { countryLabel } from "@/config/countries";
 import { api } from "@/lib/api";
+import type { AdminAccess, AdminAction, AdminUser } from "@/lib/api/types";
 import { qk } from "@/hooks/useGarimpo";
-import { formatDate, formatDuration, formatMoney, formatTime } from "@/lib/format";
+import { formatDate, formatDateTime, relativeTime } from "@/lib/format";
 import { pt } from "@/i18n/pt";
-import { APP_NAME } from "@/config/brand";
 
-const statusLabel = () =>
-  ({
-    PENDING: pt.admin.statusPENDING,
-    ACTIVE: pt.admin.statusACTIVE,
-    SUSPENDED: pt.admin.statusSUSPENDED,
-  }) as const;
+const ACCESS_VARIANT: Record<AdminAccess, "default" | "secondary" | "outline" | "destructive"> = {
+  admin: "default",
+  paid: "default",
+  trial: "secondary",
+  expired: "destructive",
+  unverified: "outline",
+};
+
+function Card({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
+  return (
+    <div className="surface p-4">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={
+          warn && value > 0 ? "text-2xl font-semibold text-destructive" : "text-2xl font-semibold"
+        }
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
 
 export function AdminPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteDays, setInviteDays] = useState(7);
+  const [access, setAccess] = useState("all");
+  const [onlyErrors, setOnlyErrors] = useState(false);
 
   if (user && user.role !== "ADMIN") throw notFound();
 
+  const overview = useQuery({ queryKey: qk.adminOverview, queryFn: () => api.admin.overview() });
   const users = useQuery({
-    queryKey: qk.adminUsers(search),
-    queryFn: () => api.admin.users(search ? { q: search } : {}),
+    queryKey: [...qk.adminUsers(search), access],
+    queryFn: () =>
+      api.admin.users({
+        ...(search ? { q: search } : {}),
+        ...(access !== "all" ? { access } : {}),
+      }),
   });
-  const invites = useQuery({ queryKey: qk.adminInvites, queryFn: () => api.admin.invites() });
-  const runs = useQuery({ queryKey: qk.adminRuns(), queryFn: () => api.admin.runs() });
-  const stats = useQuery({ queryKey: qk.adminStats, queryFn: () => api.admin.stats() });
+  const runs = useQuery({
+    queryKey: [...qk.adminRuns(onlyErrors ? "error" : ""), "list"],
+    queryFn: () => api.admin.runs(onlyErrors ? { status: "error" } : {}),
+    refetchInterval: 15000,
+  });
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ["admin"] });
+  };
+
+  const act = async (target: AdminUser, action: AdminAction) => {
+    try {
+      await api.admin.updateUser(target.id, { action, days: 7 });
+      toast.success(pt.adm.done);
+      refresh();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const remove = async (target: AdminUser) => {
+    if (!window.confirm(`${target.email}\n\n${pt.adm.confirmDelete}`)) return;
+    try {
+      await api.admin.deleteUser(target.id);
+      toast.success(pt.adm.done);
+      refresh();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const accessLabel = (value: AdminAccess) => pt.adm[`access_${value}` as const];
+  const o = overview.data;
+  const t = pt.adm;
 
   return (
     <div className="space-y-5">
-      <PageHeader title={pt.admin.title} />
+      <PageHeader title={t.title} />
 
-      <Tabs defaultValue="users">
+      <Tabs defaultValue="overview">
         <TabsList>
-          <TabsTrigger value="users">{pt.admin.tabUsers}</TabsTrigger>
-          <TabsTrigger value="invites">{pt.admin.tabInvites}</TabsTrigger>
-          <TabsTrigger value="runs">{pt.admin.tabRuns}</TabsTrigger>
-          <TabsTrigger value="business">{pt.admin.tabBusiness}</TabsTrigger>
+          <TabsTrigger value="overview">{t.tabOverview}</TabsTrigger>
+          <TabsTrigger value="users">{t.tabUsers}</TabsTrigger>
+          <TabsTrigger value="runs">{t.tabRuns}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="users" className="space-y-4 pt-4">
-          <Input
-            aria-label={pt.common.search}
-            placeholder={pt.common.search}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="max-w-sm"
-          />
-          {users.isLoading ? <LoadingList rows={3} /> : null}
+        <TabsContent value="overview" className="pt-4">
+          {overview.isLoading ? <LoadingList rows={2} /> : null}
+          {overview.isError ? (
+            <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
+          ) : null}
+          {o ? (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Card label={t.cardUsers} value={o.users} />
+              <Card label={t.cardNew} value={o.newThisWeek} />
+              <Card label={t.cardVerified} value={o.verified} />
+              <Card label={t.cardUnverified} value={o.unverified} />
+              <Card label={t.cardTrial} value={o.inTrial} />
+              <Card label={t.cardPaid} value={o.paid} />
+              <Card label={t.cardExpired} value={o.expired} />
+              <Card label={t.cardSuspended} value={o.suspended} />
+              <Card label={t.cardAlerts} value={o.alerts} />
+              <Card label={t.cardDestinations} value={o.destinations} />
+              <Card label={t.cardItems} value={o.items} />
+              <Card label={t.cardMonitor} value={o.monitorOn} />
+              <Card label={t.cardRuns} value={o.runsLastDay} />
+              <Card label={t.cardErrors} value={o.runErrorsLastDay} warn />
+            </div>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="users" className="space-y-3 pt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="max-w-xs"
+              placeholder={t.search}
+              aria-label={t.search}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Select value={access} onValueChange={setAccess}>
+              <SelectTrigger className="w-44" aria-label={t.colAccess}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t.allAccess}</SelectItem>
+                {(["trial", "paid", "expired", "unverified", "admin"] as const).map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {accessLabel(a)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {users.isLoading ? <LoadingList rows={4} /> : null}
           {users.isError ? (
             <ErrorState error={users.error} onRetry={() => users.refetch()} />
           ) : null}
@@ -80,211 +186,164 @@ export function AdminPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>E-mail</TableHead>
-                    <TableHead>Plano</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>{pt.admin.createdAt}</TableHead>
+                    <TableHead>{t.colEmail}</TableHead>
+                    <TableHead>{t.colAccess}</TableHead>
+                    <TableHead>{t.colUntil}</TableHead>
+                    <TableHead>{t.colAlerts}</TableHead>
+                    <TableHead>{t.colDest}</TableHead>
+                    <TableHead>{t.colMonitor}</TableHead>
+                    <TableHead>{t.colCreated}</TableHead>
+                    <TableHead>{t.colLogin}</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.data.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>{row.email}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{row.plan}</Badge>
+                  {users.data.map((u) => (
+                    <TableRow key={u.id}>
+                      <TableCell className="font-medium">
+                        {u.email}
+                        <span className="block text-xs text-muted-foreground">
+                          {u.country ? countryLabel(u.country) : "—"} · {u.currency}
+                          {u.stripeCustomer ? ` · ${t.stripe}` : ""}
+                          {u.status === "SUSPENDED" ? " · ⛔" : ""}
+                        </span>
                       </TableCell>
-                      <TableCell>{statusLabel()[row.status]}</TableCell>
-                      <TableCell>{formatDate(row.createdAt)}</TableCell>
-                      <TableCell className="space-x-2 text-right">
-                        {row.status === "PENDING" ? (
-                          <Button
-                            size="sm"
-                            onClick={async () => {
-                              await api.admin.updateUser(row.id, { status: "ACTIVE" });
-                              void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
-                            }}
-                          >
-                            {pt.admin.approve}
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            await api.admin.updateUser(row.id, {
-                              status: row.status === "SUSPENDED" ? "ACTIVE" : "SUSPENDED",
-                            });
-                            void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
-                          }}
-                        >
-                          {row.status === "SUSPENDED" ? pt.admin.reactivate : pt.admin.suspend}
-                        </Button>
+                      <TableCell>
+                        <Badge variant={ACCESS_VARIANT[u.access]}>{accessLabel(u.access)}</Badge>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {u.access === "trial" || u.access === "expired"
+                          ? formatDate(u.trialEndsAt)
+                          : "—"}
+                      </TableCell>
+                      <TableCell>{u.alerts}</TableCell>
+                      <TableCell>{u.destinations}</TableCell>
+                      <TableCell>{u.monitorEnabled ? t.on : t.off}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {formatDate(u.createdAt)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {u.lastLoginAt ? relativeTime(u.lastLoginAt) : t.never}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label={t.actions}>
+                              <MoreHorizontal className="size-4" aria-hidden />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => void act(u, "grant_access")}>
+                              {t.grant}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void act(u, "revoke_access")}>
+                              {t.revoke}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void act(u, "extend_trial")}>
+                              {t.extend}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void act(u, "end_trial")}>
+                              {t.endTrial}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {u.status === "SUSPENDED" ? (
+                              <DropdownMenuItem onSelect={() => void act(u, "reactivate")}>
+                                {t.reactivate}
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onSelect={() => void act(u, "suspend")}>
+                                {t.suspend}
+                              </DropdownMenuItem>
+                            )}
+                            {u.role === "ADMIN" ? (
+                              <DropdownMenuItem onSelect={() => void act(u, "remove_admin")}>
+                                {t.removeAdmin}
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onSelect={() => void act(u, "make_admin")}>
+                                {t.makeAdmin}
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onSelect={() => void remove(u)}
+                            >
+                              {t.delete}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))}
+                  {users.data.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
+                        {t.empty}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                 </TableBody>
               </Table>
             </div>
           ) : null}
         </TabsContent>
 
-        <TabsContent value="invites" className="space-y-4 pt-4">
-          <form
-            className="surface flex flex-wrap items-end gap-3 p-4"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              try {
-                await api.admin.createInvite({
-                  ...(inviteEmail ? { email: inviteEmail } : {}),
-                  expiresInDays: inviteDays,
-                });
-                setInviteEmail("");
-                void queryClient.invalidateQueries({ queryKey: qk.adminInvites });
-              } catch (error) {
-                toast.error(errorMessage(error));
-              }
-            }}
+        <TabsContent value="runs" className="space-y-3 pt-4">
+          <Button
+            variant={onlyErrors ? "default" : "outline"}
+            size="sm"
+            onClick={() => setOnlyErrors((v) => !v)}
           >
-            <div className="space-y-2">
-              <Label htmlFor="inviteEmail">{pt.admin.inviteEmail}</Label>
-              <Input
-                id="inviteEmail"
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="inviteDays">{pt.admin.inviteDays}</Label>
-              <Input
-                id="inviteDays"
-                type="number"
-                min={1}
-                className="w-24"
-                value={inviteDays}
-                onChange={(e) => setInviteDays(Number(e.target.value))}
-              />
-            </div>
-            <Button type="submit">{pt.admin.newInvite}</Button>
-          </form>
-
-          {invites.isLoading ? <LoadingList rows={2} /> : null}
-          {invites.data ? (
+            {t.onlyErrors}
+          </Button>
+          {runs.isLoading ? <LoadingList rows={4} /> : null}
+          {runs.isError ? <ErrorState error={runs.error} onRetry={() => runs.refetch()} /> : null}
+          {runs.data ? (
             <div className="surface overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>{pt.admin.code}</TableHead>
-                    <TableHead>E-mail</TableHead>
-                    <TableHead>{pt.admin.validity}</TableHead>
-                    <TableHead />
+                    <TableHead>{t.colWhen}</TableHead>
+                    <TableHead>{t.runsCols}</TableHead>
+                    <TableHead>{t.colDuration}</TableHead>
+                    <TableHead>{t.colAnalyzed}</TableHead>
+                    <TableHead>{t.colMatches}</TableHead>
+                    <TableHead>{t.colResult}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {invites.data.map((invite) => (
-                    <TableRow key={invite.id}>
-                      <TableCell className="font-mono text-xs">{invite.code}</TableCell>
-                      <TableCell>{invite.email ?? "—"}</TableCell>
-                      <TableCell>{formatDate(invite.expiresAt)}</TableCell>
-                      <TableCell className="space-x-2 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            await navigator.clipboard.writeText(
-                              `${window.location.origin}/register?invite=${invite.code}`,
-                            );
-                            toast.success(pt.common.copied);
-                          }}
-                        >
-                          {pt.admin.copyLink}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={async () => {
-                            await api.admin.revokeInvite(invite.id);
-                            void queryClient.invalidateQueries({ queryKey: qk.adminInvites });
-                          }}
-                        >
-                          {pt.admin.revoke}
-                        </Button>
+                  {runs.data.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {formatDateTime(r.startedAt)}
+                      </TableCell>
+                      <TableCell className="text-xs">{r.searchKey}</TableCell>
+                      <TableCell className="text-xs">
+                        {(r.durationMs / 1000).toFixed(1)} s
+                      </TableCell>
+                      <TableCell>{r.analyzed}</TableCell>
+                      <TableCell>{r.matches}</TableCell>
+                      <TableCell className="text-xs">
+                        <Badge variant={r.status === "ok" ? "secondary" : "destructive"}>
+                          {r.status}
+                        </Badge>
+                        {r.error ? (
+                          <span className="ml-2 text-muted-foreground">{r.error}</span>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}
+                  {runs.data.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                        {t.empty}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                 </TableBody>
               </Table>
             </div>
-          ) : null}
-        </TabsContent>
-
-        <TabsContent value="runs" className="space-y-4 pt-4">
-          {runs.isLoading ? <LoadingList rows={3} /> : null}
-          {runs.data ? (
-            <ul className="surface divide-y divide-border p-2 text-sm">
-              {runs.data.map((run) => (
-                <li key={run.id} className="flex flex-wrap items-center gap-2 p-2">
-                  <span className="w-14 text-muted-foreground">{formatTime(run.startedAt)}</span>
-                  <Badge variant={run.status === "ok" ? "secondary" : "destructive"}>
-                    {run.status}
-                  </Badge>
-                  <span className="text-muted-foreground">
-                    {run.analyzed} analisados · {run.matches} novos · {run.sent} enviados
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </TabsContent>
-
-        <TabsContent value="business" className="space-y-4 pt-4">
-          {stats.isLoading ? <LoadingList rows={2} /> : null}
-          {stats.data ? (
-            <>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="surface p-4">
-                  <p className="text-xs text-muted-foreground">{pt.admin.mrr}</p>
-                  <p className="text-2xl font-semibold">{formatMoney(stats.data.mrr)}</p>
-                </div>
-                <div className="surface p-4">
-                  <p className="text-xs text-muted-foreground">{pt.admin.detection}</p>
-                  <p className="text-2xl font-semibold">
-                    {formatDuration(stats.data.detectionP50Seconds)} /{" "}
-                    {formatDuration(stats.data.detectionP95Seconds)}
-                  </p>
-                </div>
-                <div className="surface p-4">
-                  <p className="text-xs text-muted-foreground">{pt.admin.errorRate}</p>
-                  <p className="text-2xl font-semibold">{stats.data.errorRatePct}%</p>
-                </div>
-              </div>
-
-              <div className="surface p-4">
-                <p className="mb-3 text-sm font-semibold">{pt.admin.usersByPlan}</p>
-                <div className="h-48 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={Object.entries(stats.data.usersByPlan).map(([plan, total]) => ({
-                        plan,
-                        total,
-                      }))}
-                    >
-                      <XAxis dataKey="plan" stroke="var(--color-muted-foreground)" fontSize={12} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "var(--color-popover)",
-                          border: "1px solid var(--color-border)",
-                          borderRadius: "var(--radius-lg)",
-                          fontSize: 12,
-                        }}
-                      />
-                      <Bar dataKey="total" fill="var(--color-primary)" radius={4} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </>
           ) : null}
         </TabsContent>
       </Tabs>
