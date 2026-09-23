@@ -52,6 +52,31 @@ def test_notify_on_first_run_sends_what_already_exists_cheapest_first(client, si
     assert sent_titles(fake_channel) == [["iPhone 12 B", "iPhone 12 A"]]  # uma mensagem, mais barato primeiro
 
 
+def test_a_listing_well_below_the_alerts_usual_price_is_flagged(client, signup, link_destination, fake_source, fake_channel, engine_):
+    setup_user(client, signup, link_destination, alert={**IPHONE, "notifyOnFirstRun": True})
+    # 1ª leva: ainda não há histórico, então nenhum dos 3 é comparado a nada.
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12 A", 100), make_raw(2, "iPhone 12 B", 100), make_raw(3, "iPhone 12 C", 100)])
+    engine_.tick(T(0))
+    assert all(i.price_vs_avg_pct is None for i in fake_channel.sent[0][1].items)
+
+    # 2ª leva: já há 3 anúncios anteriores (média 100€); este novo, a 40€, é bem mais barato que o normal.
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12 A", 100), make_raw(2, "iPhone 12 B", 100), make_raw(3, "iPhone 12 C", 100), make_raw(4, "iPhone 12 D", 40)])
+    engine_.tick(T(6))
+    second_message = fake_channel.sent[1][1]
+    assert second_message.items[0].title == "iPhone 12 D"
+    assert second_message.items[0].price_vs_avg_pct == -60.0
+
+
+def test_a_listing_only_slightly_cheaper_is_not_flagged(client, signup, link_destination, fake_source, fake_channel, engine_):
+    setup_user(client, signup, link_destination, alert={**IPHONE, "notifyOnFirstRun": True})
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12 A", 100), make_raw(2, "iPhone 12 B", 100), make_raw(3, "iPhone 12 C", 100)])
+    engine_.tick(T(0))
+
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12 A", 100), make_raw(2, "iPhone 12 B", 100), make_raw(3, "iPhone 12 C", 100), make_raw(4, "iPhone 12 D", 95)])
+    engine_.tick(T(6))
+    assert fake_channel.sent[1][1].items[0].price_vs_avg_pct is None  # só 5% mais barato: dentro do normal
+
+
 def test_filters_drop_accessories_and_wrong_models(client, signup, link_destination, fake_source, fake_channel, engine_):
     setup_user(client, signup, link_destination, alert={**IPHONE, "excludePresets": ["PHONES"], "notifyOnFirstRun": True})
     fake_source.put(

@@ -399,6 +399,16 @@ def test_card_shows_highlight_price_condition_country_and_posting_time():
     assert "💰 <b>1 234,50 €</b>" in pt and "⏱ <b>Posted just now</b>" in pt and "🇫🇷 FR" in pt
 
 
+def test_card_flags_a_price_well_below_the_alerts_average():
+    from app.services.telegram import render_card
+
+    cheap = MessageItem("iPhone 12", 40, "EUR", "u", price_vs_avg_pct=-60.0)
+    assert "📉 60% below the usual price for this search" in render_card(cheap, "iphone 12", "en")
+
+    normal = MessageItem("iPhone 12", 95, "EUR", "u")
+    assert "below the usual price" not in render_card(normal, "iphone 12", "en")
+
+
 def test_posting_time_units_and_unknown_age():
     from app.services.telegram import posted_text
 

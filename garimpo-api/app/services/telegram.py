@@ -162,7 +162,8 @@ def render_message(message: AlertMessage) -> str:
         elif item.currency != "EUR" and item.price_eur:
             price += f" (≈ {_money(item.price_eur)} EUR)"
         facts = " | ".join(x for x in (price, item.condition, item.seller) if x)
-        lines.append(f"{prefix}{facts}\n{item.title}\n{item.url}")
+        below_avg = f"\n{tr(lang, 'below_avg', pct=abs(round(item.price_vs_avg_pct)))}" if item.price_vs_avg_pct is not None else ""
+        lines.append(f"{prefix}{facts}\n{item.title}\n{item.url}{below_avg}")
     if message.extra_count:
         lines.append(tr(lang, "and_more", n=message.extra_count))
     return "\n\n".join(lines)
@@ -219,6 +220,8 @@ def render_card(item: MessageItem, alert_name: str, language: str) -> str:
     else:
         price = f"<b>{esc(format_price(item.price, item.currency, language))}</b>"
     lines.append(f"💰 {price}")
+    if item.price_vs_avg_pct is not None:
+        lines.append(esc(tr(language, "below_avg", pct=abs(round(item.price_vs_avg_pct)))))
     facts = " · ".join(x for x in (item.condition and f"✨ {item.condition}", flag(item.domain) and f"{flag(item.domain)} {item.domain.upper()}") if x)
     if facts:
         lines.append(facts)

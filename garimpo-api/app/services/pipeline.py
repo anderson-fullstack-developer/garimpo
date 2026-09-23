@@ -322,9 +322,22 @@ def _age_seconds(item: Item) -> float | None:
 
 _CONDITIONS = {"new_with_tags", "new_without_tags", "very_good", "good", "satisfactory"}
 
+# Só falamos de "preço abaixo da média" com uma base mínima de anúncios anteriores (senão a "média" é ruído).
+MIN_PRICE_HISTORY = 3
+# E só quando a diferença é grande o bastante para valer a pena chamar atenção (ruído normal de preço, não).
+BELOW_AVG_THRESHOLD_PCT = -10.0
+
+
+def _price_history_eur(db: Session, alert: Alert, exclude_item_ids: set[str]) -> list[float]:
+    """Preço (em EUR) dos anúncios que já bateram com este alerta antes, para servir de "preço normal"."""
+    query = select(Item.price, Item.currency).join(Match, Match.item_id == Item.id).where(Match.alert_id == alert.id)
+    if exclude_item_ids:
+        query = query.where(Item.id.notin_(exclude_item_ids))
+    return [to_eur(float(price), currency) for price, currency in db.execute(query).all()]
+
 
 def build_message(
-    alert: Alert, items: list[Item], user: User | None = None, language: str | None = None
+    db: Session, alert: Alert, items: list[Item], user: User | None = None, language: str | None = None
 ) -> AlertMessage:
     """`language`: idioma do destino; sem ele vale o da conta."""
     limit = get_settings().max_items_per_message
@@ -333,6 +346,8 @@ def build_message(
     language = normalize_language(language or (user.language if user else None))
     currency = user.currency if user else "EUR"
     titles = translate_titles([i.title for i in shown], language)
+    history = _price_history_eur(db, alert, {i.id for i in items})
+    avg_price_eur = sum(history) / len(history) if len(history) >= MIN_PRICE_HISTORY else None
     message_items: list[MessageItem] = []
     for index, (item, title) in enumerate(zip(shown, titles)):
         price = float(item.price)
@@ -340,6 +355,9 @@ def build_message(
         if language == "pt" and title != item.title:
             item.title_pt = title[:300]
         highlight = "PERFECT" if _is_perfect(alert, price_eur) else ("BEST" if len(ordered) >= 4 and index < 3 else None)
+        vs_avg_pct = ((price_eur - avg_price_eur) / avg_price_eur * 100) if avg_price_eur else None
+        if vs_avg_pct is not None and vs_avg_pct > BELOW_AVG_THRESHOLD_PCT:
+            vs_avg_pct = None  # só vale destacar quando é bem mais barato que o normal
         message_items.append(
             MessageItem(
                 title=title,
@@ -356,6 +374,7 @@ def build_message(
                 original_title=item.title,
                 domain=item.domain,
                 age_seconds=_age_seconds(item),
+                price_vs_avg_pct=round(vs_avg_pct, 1) if vs_avg_pct is not None else None,
             )
         )
     return AlertMessage(alert.name, message_items, extra_count=len(ordered) - len(shown), language=language)
@@ -392,7 +411,7 @@ def notify_outcomes(db: Session, outcomes: list[AlertOutcome]) -> tuple[int, lis
             continue
 
         owner = db.get(User, alert.user_id)
-        message = build_message(alert, items, owner, destination.language)
+        message = build_message(db, alert, items, owner, destination.language)
         try:
             channels.get_channel(destination.channel).send(destination, message)
         except TransientChannelError as exc:

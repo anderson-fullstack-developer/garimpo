@@ -207,7 +207,7 @@ def send_to_destination(
         raise not_found("Listing")
     first_alert = rows[0][1]
     language = destination.language or user.language
-    message = build_message(first_alert, list({item.id: item for item, _ in rows}.values()), user, language)
+    message = build_message(db, first_alert, list({item.id: item for item, _ in rows}.values()), user, language)
     message.alert_name = tr(language, "selected")
     _deliver(db, destination, lambda ch: ch.send(destination, message))
     db.commit()  # guarda as traduções de título

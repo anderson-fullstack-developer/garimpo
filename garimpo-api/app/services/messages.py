@@ -34,6 +34,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "open_button": "🛒 Open on Vinted",
         "posted_now": "Posted just now",
         "posted_ago": "Posted {n} {u} ago",
+        "below_avg": "📉 {pct}% below the usual price for this search",
         "alert_line": "🔔 {name}",
         "on": "on",
         "off": "paused",

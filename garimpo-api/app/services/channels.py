@@ -45,6 +45,7 @@ class MessageItem:
     original_title: str | None = None  # título antes da tradução
     domain: str | None = None  # país do anúncio (pt, fr, pl...)
     age_seconds: float | None = None  # há quanto tempo foi publicado (estimado)
+    price_vs_avg_pct: float | None = None  # % abaixo da média histórica deste alerta (só quando é notável)
 
 
 @dataclass
