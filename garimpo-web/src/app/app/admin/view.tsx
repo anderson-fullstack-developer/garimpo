@@ -9,6 +9,13 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -38,8 +45,8 @@ import { countryLabel } from "@/config/countries";
 import { api } from "@/lib/api";
 import type { AdminAccess, AdminAction, AdminUser } from "@/lib/api/types";
 import { qk } from "@/hooks/useGarimpo";
-import { formatDate, formatDateTime, relativeTime } from "@/lib/format";
-import { pt } from "@/i18n/pt";
+import { formatDate, formatDateTime, formatMoney, relativeTime } from "@/lib/format";
+import { pt, t as fill } from "@/i18n/pt";
 
 const ACCESS_VARIANT: Record<AdminAccess, "default" | "secondary" | "outline" | "destructive"> = {
   admin: "default",
@@ -70,6 +77,7 @@ export function AdminPage() {
   const [search, setSearch] = useState("");
   const [access, setAccess] = useState("all");
   const [onlyErrors, setOnlyErrors] = useState(false);
+  const [viewing, setViewing] = useState<AdminUser | null>(null);
 
   if (user && user.role !== "ADMIN") throw notFound();
 
@@ -86,6 +94,12 @@ export function AdminPage() {
     queryKey: [...qk.adminRuns(onlyErrors ? "error" : ""), "list"],
     queryFn: () => api.admin.runs(onlyErrors ? { status: "error" } : {}),
     refetchInterval: 15000,
+  });
+
+  const notifications = useQuery({
+    queryKey: ["admin", "notifications", viewing?.id ?? ""],
+    queryFn: () => api.admin.userNotifications(viewing!.id),
+    enabled: Boolean(viewing),
   });
 
   const refresh = () => {
@@ -192,6 +206,7 @@ export function AdminPage() {
                     <TableHead>{t.colAlerts}</TableHead>
                     <TableHead>{t.colDest}</TableHead>
                     <TableHead>{t.colMonitor}</TableHead>
+                    <TableHead>{t.colNotified}</TableHead>
                     <TableHead>{t.colCreated}</TableHead>
                     <TableHead>{t.colLogin}</TableHead>
                     <TableHead />
@@ -219,6 +234,25 @@ export function AdminPage() {
                       <TableCell>{u.alerts}</TableCell>
                       <TableCell>{u.destinations}</TableCell>
                       <TableCell>{u.monitorEnabled ? t.on : t.off}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <button
+                          type="button"
+                          className="text-left hover:underline"
+                          onClick={() => setViewing(u)}
+                        >
+                          {u.notified}
+                        </button>
+                        {u.notifyFailed > 0 ? (
+                          <span className="block text-xs text-destructive">
+                            {fill(t.notifiedFailed, { n: u.notifyFailed })}
+                          </span>
+                        ) : null}
+                        {u.lastNotifiedAt ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {fill(t.notifiedLast, { when: relativeTime(u.lastNotifiedAt) })}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-xs">
                         {formatDate(u.createdAt)}
                       </TableCell>
@@ -233,6 +267,10 @@ export function AdminPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => setViewing(u)}>
+                              {t.viewNotifications}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem onSelect={() => void act(u, "grant_access")}>
                               {t.grant}
                             </DropdownMenuItem>
@@ -278,7 +316,7 @@ export function AdminPage() {
                   ))}
                   {users.data.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={10} className="text-center text-sm text-muted-foreground">
                         {t.empty}
                       </TableCell>
                     </TableRow>
@@ -347,6 +385,103 @@ export function AdminPage() {
           ) : null}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={Boolean(viewing)} onOpenChange={(open) => !open && setViewing(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t.notifTitle}</DialogTitle>
+            <DialogDescription>
+              {viewing?.email}
+              <span className="block">{t.notifDesc}</span>
+            </DialogDescription>
+          </DialogHeader>
+          {notifications.isLoading ? <LoadingList rows={3} /> : null}
+          {notifications.isError ? (
+            <ErrorState error={notifications.error} onRetry={() => notifications.refetch()} />
+          ) : null}
+          {notifications.data ? (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-3">
+                <Card label={t.notifSent} value={notifications.data.sent} />
+                <Card label={t.notifFailed} value={notifications.data.failed} warn />
+              </div>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium">{t.notifByAlert}</h3>
+                {notifications.data.alerts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t.empty}</p>
+                ) : (
+                  <ul className="divide-y rounded-md border text-sm">
+                    {notifications.data.alerts.map((a) => (
+                      <li key={a.id} className="flex items-center justify-between gap-3 p-2">
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">{a.name}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            “{a.query}” · {countryLabel(a.country)}
+                            {a.active ? "" : ` · ${t.notifPaused}`}
+                          </span>
+                        </span>
+                        <span className="whitespace-nowrap text-right">
+                          {a.sent}
+                          {a.failed > 0 ? (
+                            <span className="block text-xs text-destructive">
+                              {fill(t.notifiedFailed, { n: a.failed })}
+                            </span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium">{t.notifItems}</h3>
+                {notifications.data.items.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t.notifNone}</p>
+                ) : (
+                  <ul className="divide-y rounded-md border text-sm">
+                    {notifications.data.items.map((n) => (
+                      <li key={n.id} className="flex gap-3 p-2">
+                        {n.photoUrl ? (
+                          <img
+                            src={n.photoUrl}
+                            alt=""
+                            className="size-12 shrink-0 rounded object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="size-12 shrink-0 rounded bg-muted" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <a
+                            href={n.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block truncate font-medium hover:underline"
+                          >
+                            {n.title}
+                          </a>
+                          <span className="block text-xs text-muted-foreground">
+                            {formatMoney(n.price, n.currency)} · vinted.{n.domain}
+                            {n.alertName ? ` · ${n.alertName}` : ""}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {formatDateTime(n.sentAt)} ·{" "}
+                            <span className={n.ok ? "" : "text-destructive"}>
+                              {n.ok ? t.notifOk : `${t.notifFail}: ${n.error ?? "—"}`}
+                            </span>
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

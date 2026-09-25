@@ -204,6 +204,42 @@ export interface AdminUser {
   alerts: number;
   destinations: number;
   monitorEnabled: boolean;
+  /** Anúncios que chegaram de fato no Telegram. */
+  notified: number;
+  /** Anúncios que não chegaram (sem destino, bot bloqueado...). */
+  notifyFailed: number;
+  lastNotifiedAt: string | null;
+}
+
+export interface AdminAlertTally {
+  id: string;
+  name: string;
+  query: string;
+  country: string;
+  active: boolean;
+  sent: number;
+  failed: number;
+}
+
+export interface AdminNotification {
+  id: string;
+  sentAt: string;
+  ok: boolean;
+  error: string | null;
+  alertName: string | null;
+  title: string;
+  price: number;
+  currency: string;
+  url: string;
+  photoUrl: string | null;
+  domain: string;
+}
+
+export interface AdminUserNotifications {
+  sent: number;
+  failed: number;
+  alerts: AdminAlertTally[];
+  items: AdminNotification[];
 }
 
 export interface AdminOverview {
@@ -361,6 +397,7 @@ export interface Api {
     users(params?: { q?: string | undefined; access?: string | undefined }): Promise<AdminUser[]>;
     updateUser(id: string, input: { action: AdminAction; days?: number }): Promise<AdminUser>;
     deleteUser(id: string): Promise<void>;
+    userNotifications(id: string): Promise<AdminUserNotifications>;
     runs(params?: { status?: string | undefined }): Promise<AdminRun[]>;
   };
 }

@@ -1,6 +1,7 @@
 import { ApiError } from "../types";
 import type {
   AdminUser,
+  AdminUserNotifications,
   Alert,
   AlertInput,
   Api,
@@ -627,8 +628,42 @@ export const mockApi: Api = {
           alerts: 2,
           destinations: 1,
           monitorEnabled: true,
+          notified: 1,
+          notifyFailed: 0,
+          lastNotifiedAt: new Date(Date.now() - 3600e3).toISOString(),
         },
       ]),
+    userNotifications: () =>
+      respond<AdminUserNotifications>({
+        sent: 1,
+        failed: 0,
+        alerts: [
+          {
+            id: "a_demo",
+            name: "iPhone 11",
+            query: "iphone 11",
+            country: "pt",
+            active: true,
+            sent: 1,
+            failed: 0,
+          },
+        ],
+        items: [
+          {
+            id: "n_demo",
+            sentAt: new Date(Date.now() - 3600e3).toISOString(),
+            ok: true,
+            error: null,
+            alertName: "iPhone 11",
+            title: "iPhone 11 64GB preto",
+            price: 180,
+            currency: "EUR",
+            url: "https://www.vinted.pt/items/1",
+            photoUrl: null,
+            domain: "pt",
+          },
+        ],
+      }),
     updateUser: () =>
       Promise.reject(new ApiError(400, "VALIDATION_ERROR", "Indisponível no modo demonstração")),
     deleteUser: () =>

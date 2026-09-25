@@ -108,3 +108,51 @@ def test_admin_lists_monitor_runs(client, signup, session_factory):
     errors = client.get("/admin/runs", params={"status": "error"}).json()
     assert len(errors) == 1 and errors[0]["error"] == "blocked"
     assert client.get("/admin/overview").json()["runErrorsLastDay"] == 1
+
+
+def test_admin_sees_what_reached_each_users_telegram(client, signup, session_factory, make_client):
+    from decimal import Decimal
+
+    from app.models import Item, Match, Notification, new_id
+
+    signup(client)
+    other = make_client()
+    signup(other, "bia@example.com")
+    created = other.post("/alerts", json=ALERT).json()
+    alert_id = created["id"]
+    _make_admin(session_factory)
+    bia = _user(session_factory, "bia@example.com")
+
+    with session_factory() as db:
+        now = utcnow()
+        for n, (title, ok, error) in enumerate(
+            [
+                ("iPhone 11 64GB", True, None),  # chegou
+                ("iPhone 11 Pro", False, "sem destino conectado"),  # não chegou
+                ("iPhone 11 antigo", True, "baseline"),  # visto em silêncio na 1ª busca: não conta
+            ]
+        ):
+            item = Item(
+                id=new_id(), vinted_id=9000 + n, title=title, price=Decimal("150"), currency="EUR",
+                seller_login="#1", url=f"https://www.vinted.pt/items/{9000 + n}", first_seen_at=now, last_seen_at=now,
+            )  # fmt: skip
+            db.add(item)
+            db.flush()
+            db.add(Match(user_id=bia.id, alert_id=alert_id, item_id=item.id))
+            db.add(Notification(user_id=bia.id, item_id=item.id, ok=ok, error=error, sent_at=now + timedelta(seconds=n)))
+        db.commit()
+
+    row = {u["email"]: u for u in client.get("/admin/users").json()}["bia@example.com"]
+    assert row["notified"] == 1 and row["notifyFailed"] == 1 and row["lastNotifiedAt"] is not None
+
+    data = client.get(f"/admin/users/{bia.id}/notifications").json()
+    assert data["sent"] == 1 and data["failed"] == 1
+    assert [(a["id"], a["sent"], a["failed"]) for a in data["alerts"]] == [(alert_id, 1, 1)]
+    assert [(i["title"], i["ok"], i["error"]) for i in data["items"]] == [
+        ("iPhone 11 Pro", False, "sem destino conectado"),
+        ("iPhone 11 64GB", True, None),
+    ]
+    assert data["items"][0]["alertName"] == created["name"]
+
+    assert client.get("/admin/users/nao-existe/notifications").status_code == 404
+    assert other.get(f"/admin/users/{bia.id}/notifications").status_code == 404  # só administrador

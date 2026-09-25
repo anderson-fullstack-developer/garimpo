@@ -1,6 +1,7 @@
 import { ApiError } from "./types";
 import type {
   AdminUser,
+  AdminUserNotifications,
   Alert,
   AlertInput,
   Api,
@@ -201,6 +202,7 @@ export const httpApi: Api = {
     updateUser: (id, input) =>
       request<AdminUser>(`/admin/users/${id}`, { method: "PATCH", body: input }),
     deleteUser: (id) => request<void>(`/admin/users/${id}`, { method: "DELETE" }),
+    userNotifications: (id) => request<AdminUserNotifications>(`/admin/users/${id}/notifications`),
     runs: (params) => request<AdminRun[]>("/admin/runs", { query: params }),
   },
 };

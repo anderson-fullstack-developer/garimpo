@@ -8,14 +8,14 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.access import has_access, has_subscription, trial_active
 from app.db import get_db
 from app.deps import get_current_user
 from app.errors import ApiError, not_found
-from app.models import Alert, Destination, Item, MonitorRun, User, UserSettings, utcnow
+from app.models import Alert, Destination, Item, Match, MonitorRun, Notification, User, UserSettings, utcnow
 from app.schemas import CamelModel
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -48,6 +48,9 @@ class AdminUserOut(CamelModel):
     alerts: int
     destinations: int
     monitor_enabled: bool
+    notified: int  # anúncios que chegaram de fato no Telegram
+    notify_failed: int  # anúncios que não chegaram (sem destino, bot bloqueado...)
+    last_notified_at: datetime | None
 
 
 class AdminOverviewOut(CamelModel):
@@ -76,6 +79,37 @@ class AdminRunOut(CamelModel):
     analyzed: int
     matches: int
     error: str | None
+
+
+class AdminAlertTallyOut(CamelModel):
+    id: str
+    name: str
+    query: str
+    country: str
+    active: bool
+    sent: int
+    failed: int
+
+
+class AdminNotificationOut(CamelModel):
+    id: str
+    sent_at: datetime
+    ok: bool
+    error: str | None
+    alert_name: str | None
+    title: str
+    price: float
+    currency: str
+    url: str
+    photo_url: str | None
+    domain: str
+
+
+class AdminUserNotificationsOut(CamelModel):
+    sent: int
+    failed: int
+    alerts: list[AdminAlertTallyOut]
+    items: list[AdminNotificationOut]
 
 
 class AdminUserPatch(CamelModel):
@@ -117,14 +151,32 @@ def _out(db: Session, user: User, counts: dict) -> AdminUserOut:
         alerts=counts["alerts"].get(user.id, 0),
         destinations=counts["destinations"].get(user.id, 0),
         monitor_enabled=bool(settings and settings.monitor_enabled),
+        notified=counts["notified"].get(user.id, 0),
+        notify_failed=counts["notify_failed"].get(user.id, 0),
+        last_notified_at=counts["last_notified"].get(user.id),
     )
+
+
+# Um registro em `Notification` pode ser: aviso que chegou (ok, sem erro), anúncio marcado como visto em
+# silêncio na 1ª busca do alerta (ok, error="baseline") ou aviso que falhou (ok=False, com o motivo).
+DELIVERED = and_(Notification.ok.is_(True), Notification.error.is_(None))
+FAILED = Notification.ok.is_(False)
 
 
 def _counts(db: Session) -> dict:
     def grouped(model) -> dict:
         return dict(db.execute(select(model.user_id, func.count()).group_by(model.user_id)).all())
 
-    return {"alerts": grouped(Alert), "destinations": grouped(Destination)}
+    def notifications(value, where) -> dict:
+        return dict(db.execute(select(Notification.user_id, value).where(where).group_by(Notification.user_id)).all())
+
+    return {
+        "alerts": grouped(Alert),
+        "destinations": grouped(Destination),
+        "notified": notifications(func.count(), DELIVERED),
+        "notify_failed": notifications(func.count(), FAILED),
+        "last_notified": notifications(func.max(Notification.sent_at), DELIVERED),
+    }
 
 
 @router.get("/overview", response_model=AdminOverviewOut)
@@ -167,6 +219,83 @@ def list_users(
     counts = _counts(db)
     rows = [_out(db, u, counts) for u in db.scalars(query)]
     return [r for r in rows if access is None or r.access == access]
+
+
+@router.get("/users/{user_id}/notifications", response_model=AdminUserNotificationsOut)
+def user_notifications(
+    user_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> AdminUserNotificationsOut:
+    """O que chegou (ou deveria ter chegado) no Telegram desta conta: totais por alerta e os anúncios mais recentes."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise not_found("Account")
+
+    def per_alert(where) -> dict[str, int]:
+        query = (
+            select(Match.alert_id, func.count())
+            .join(Notification, and_(Notification.user_id == Match.user_id, Notification.item_id == Match.item_id))
+            .where(Match.user_id == user.id, where)
+            .group_by(Match.alert_id)
+        )
+        return dict(db.execute(query).all())
+
+    sent_by_alert, failed_by_alert = per_alert(DELIVERED), per_alert(FAILED)
+    alerts = [
+        AdminAlertTallyOut(
+            id=a.id,
+            name=a.name,
+            query=a.query,
+            country=a.country,
+            active=a.active,
+            sent=sent_by_alert.get(a.id, 0),
+            failed=failed_by_alert.get(a.id, 0),
+        )
+        for a in db.scalars(select(Alert).where(Alert.user_id == user.id).order_by(Alert.created_at))
+    ]
+
+    rows = db.execute(
+        select(Notification, Item)
+        .join(Item, Item.id == Notification.item_id)
+        .where(Notification.user_id == user.id, or_(DELIVERED, FAILED))
+        .order_by(Notification.sent_at.desc())
+        .limit(limit)
+    ).all()
+    # O mesmo anúncio pode casar com mais de um alerta do usuário: mostramos o primeiro.
+    alert_name: dict[str, str] = {}
+    if rows:
+        for item_id, name in db.execute(
+            select(Match.item_id, Alert.name)
+            .join(Alert, Alert.id == Match.alert_id)
+            .where(Match.user_id == user.id, Match.item_id.in_([item.id for _, item in rows]))
+            .order_by(Match.created_at)
+        ).all():
+            alert_name.setdefault(item_id, name)
+
+    count = lambda where: db.scalar(select(func.count()).select_from(Notification).where(Notification.user_id == user.id, where)) or 0  # noqa: E731
+    return AdminUserNotificationsOut(
+        sent=count(DELIVERED),
+        failed=count(FAILED),
+        alerts=alerts,
+        items=[
+            AdminNotificationOut(
+                id=n.id,
+                sent_at=n.sent_at,
+                ok=n.ok,
+                error=n.error,
+                alert_name=alert_name.get(item.id),
+                title=item.title_pt or item.title,
+                price=float(item.price),
+                currency=item.currency,
+                url=item.url,
+                photo_url=item.photo_url,
+                domain=item.domain,
+            )
+            for n, item in rows
+        ],
+    )
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)
