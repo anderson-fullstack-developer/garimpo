@@ -146,3 +146,7 @@ Erros seguem o formato do front: `{ "code": "...", "message": "..." }`.
   (só se a API **não** estiver exposta direto à internet: `X-Forwarded-For` pode ser falsificado).
 - Rode `alembic upgrade head` a cada publicação e registre o webhook do Telegram (`set-webhook`).
 - Precisa de processo **sempre ligado** (o monitor): não serve para funções serverless (Vercel).
+
+## Consumo de recursos
+
+Análise do que a API gasta no Railway (CPU, memória, buscas à Vinted) e do que dá para reduzir: [docs/RELATORIO_CONSUMO.md](docs/RELATORIO_CONSUMO.md).
