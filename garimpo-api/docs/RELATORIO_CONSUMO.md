@@ -227,3 +227,38 @@ Mudanças feitas no código, sem mudar o produto: os planos, os intervalos míni
 - Variáveis: `MALLOC_ARENA_MAX=2` e `MONITOR_TICK_SECONDS=15`.
 - Limites de CPU e memória do serviço (ver primeiro nas Metrics quanto usa).
 - Usage Limits e alerta de gasto na conta.
+
+---
+
+## 10. Varredura de desperdícios (21/10/2026)
+
+Revisão de todo o código da API à procura de trabalho repetido, consultas desnecessárias e falhas. O produto continua igual: os planos, os intervalos e a opção "Europa" não mudaram.
+
+### Corrigido
+
+| # | Problema | Correção | Onde |
+|---|---|---|---|
+| 1 | O monitor lia o banco **de 5 em 5 s** só para descobrir que ninguém estava na hora de buscar. | Agora **dorme até o próximo usuário ficar na hora** (no máximo `monitor_idle_seconds`). Mudar o intervalo acorda o monitor. Com um PRO (15 s), são ~3× menos leituras; com um FREE (1 min), ~12× menos. O horário das buscas fica até mais exato. | `services/monitor.py`, `routers/monitor.py` |
+| 2 | A cada ciclo, **cada alerta** fazia uma consulta de "avisos pendentes", mesmo sem anúncio novo. | Só consulta quando há anúncio novo, quando um envio falhou por motivo passageiro (repete no ciclo seguinte) ou na 1ª vez de cada alerta depois de o servidor ligar. | `services/pipeline.py` |
+| 3 | O histórico `MonitorRun` (uma linha por país e por ciclo: um alerta "Europa" a 15 s gera ~120 000 linhas por dia) era guardado **7 dias**. | Guardado **2 dias**. O painel admin só usa as últimas 24 h. Menos espaço e menos trabalho no Neon. | `services/maintenance.py` |
+| 4 | **Falha:** `/monitor/status` mostrava as últimas execuções de **todos os usuários**, com os termos de busca de outras pessoas. | Mostra só as buscas dos alertas do próprio usuário. | `routers/monitor.py` |
+| 5 | A tradução criava **6 threads novas a cada aviso**. | Um conjunto de threads reaproveitado. | `services/translate.py` |
+| 6 | Quando a cota diária da tradução acabava, cada título ainda gerava um pedido (até 2,5 s de espera cada). | Ao receber o aviso de cota, a tradução **pausa 1 h**. O título vai no original, como antes. | `services/translate.py` |
+| 7 | `MALLOC_ARENA_MAX=2` dependia do painel do Railway. | Definido no `Dockerfile`. | `Dockerfile` |
+| 8 | O site perguntava o estado do "Buscar" **de 2 em 2 s**, e cada pergunta lê o banco. Agora cada ciclo leva 10 s ou mais. | De 5 em 5 s. | `garimpo-web/src/features/search/useManualSearch.ts` |
+
+Testes: **259 passaram, 2 ignorados** (9 novos em `tests/test_consumption.py`).
+
+### Não alterado (depende de decisão de produto ou tem risco)
+
+| Ponto | Ganho possível | Por que não foi feito |
+|---|---|---|
+| "Europa" = 21 países, a cada ciclo | O maior consumo de todos (até 63 páginas por ciclo) | Mudança de produto (C1). |
+| PRO 15 s / ELITE 10 s | Até -75% das buscas | Mudança de produto (B2). |
+| Página Resultados atualiza de 15 em 15 s **todas as páginas já carregadas** (rolou 5 páginas → 5 consultas pesadas a cada 15 s) | Menos consultas pesadas ao Neon | Muda o comportamento da tela: avaliar com o front. |
+| 21 sessões `cloudscraper` (uma por país) | Alguns MB de memória | Juntar as sessões pode piorar os bloqueios da Cloudflare. |
+| Log de acesso do uvicorn em todas as consultas periódicas | Pouca CPU, logs mais limpos | Os logs ajudam a investigar problemas. |
+
+### `MONITOR_TICK_SECONDS`
+
+Com a correção 1, esta variável passa a valer só durante a pausa por 429. **Não é preciso definir 15 no Railway.** Pior: com 15, o plano ELITE (10 s) deixaria de cumprir o intervalo prometido.

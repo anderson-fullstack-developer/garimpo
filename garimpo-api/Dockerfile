@@ -1,6 +1,8 @@
 FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
+# Python com várias threads no Linux: menos "arenas" do malloc = muito menos memória presa sem uso.
+ENV MALLOC_ARENA_MAX=2
 WORKDIR /srv
 
 COPY requirements.txt .

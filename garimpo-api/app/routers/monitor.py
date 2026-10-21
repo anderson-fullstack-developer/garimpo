@@ -10,8 +10,9 @@ from app.db import get_db
 from app.deps import require_access, require_active
 from app.entitlements import entitlements_for
 from app.errors import ApiError
-from app.models import MonitorRun, User, UserSettings
+from app.models import Alert, MonitorRun, User, UserSettings
 from app.services.monitor import engine as monitor_engine
+from app.services.pipeline import keys_for
 from app.schemas import MonitorRunOut, MonitorStatusOut, SettingsOut, SettingsPatch
 
 router = APIRouter(tags=["monitor"])
@@ -42,13 +43,26 @@ def patch_settings(
             raise ApiError(402, "PLAN_LIMIT_REACHED", f"Your plan checks at most every {floor:g} min")
         settings.interval_minutes = body.interval_minutes
     db.commit()
+    if body.interval_minutes is not None:
+        monitor_engine.wake()  # o monitor dorme até a próxima busca devida: recalcula com o novo intervalo
     return SettingsOut(interval_minutes=settings.interval_minutes)
 
 
 @router.get("/monitor/status", response_model=MonitorStatusOut)
 def monitor_status(user: User = Depends(require_active), db: Session = Depends(get_db)) -> MonitorStatusOut:
     settings = _settings(db, user)
-    runs = db.scalars(select(MonitorRun).order_by(MonitorRun.started_at.desc()).limit(24)).all()
+    # Só as buscas dos alertas DESTE usuário (antes vinham as de todo mundo, com os termos de outras pessoas).
+    labels = {k.label for a in db.scalars(select(Alert).where(Alert.user_id == user.id)) for k in keys_for(a)}
+    runs = (
+        db.scalars(
+            select(MonitorRun)
+            .where(MonitorRun.search_key.in_(labels))
+            .order_by(MonitorRun.started_at.desc())
+            .limit(24)
+        ).all()
+        if labels
+        else []
+    )
     next_run = (
         settings.last_run_at + timedelta(minutes=settings.interval_minutes)
         if settings.monitor_enabled and settings.last_run_at

@@ -26,7 +26,8 @@ export function useManualSearch() {
   const status = useQuery({
     queryKey: searchKey,
     queryFn: () => api.search.status(),
-    refetchInterval: (query) => (BUSY.includes(query.state.data?.state ?? "") ? 2000 : false),
+    // Cada ciclo da busca leva o intervalo do plano (10 s ou mais): perguntar de 2 em 2 s só gastava servidor.
+    refetchInterval: (query) => (BUSY.includes(query.state.data?.state ?? "") ? 5000 : false),
   });
   const start = useMutation({
     mutationFn: () => api.search.run({ mode: "alerts" }),

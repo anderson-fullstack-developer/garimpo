@@ -11,7 +11,8 @@ from app.models import Destination, EmailToken, Item, MonitorRun, RefreshToken, 
 
 log = logging.getLogger("garimpo.maintenance")
 
-RUNS_KEEP = timedelta(days=7)  # histórico de execuções do monitor
+# Histórico de execuções do monitor (uma linha por país e ciclo). O painel só olha as últimas 24 h.
+RUNS_KEEP = timedelta(days=2)
 TOKENS_KEEP = timedelta(days=7)  # tokens de e-mail vencidos
 REVOKED_SESSIONS_KEEP = timedelta(days=30)  # sessões revogadas (a detecção de reuso precisa delas por um tempo)
 PENDING_LINK_KEEP = timedelta(hours=1)  # códigos de vínculo do Telegram que ninguém usou

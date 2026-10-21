@@ -34,6 +34,7 @@ class TickResult:
     sent: int = 0
     errors: list[str] = field(default_factory=list)
     skipped: str | None = None
+    next_due_at: datetime | None = None  # quando o próximo usuário ligado fica na hora de buscar
 
 
 class MonitorEngine:
@@ -48,23 +49,28 @@ class MonitorEngine:
         self.backoff_seconds = 0
 
     # ------------------------------------------------------------ um ciclo
-    def _due(self, db: Session, now: datetime) -> tuple[list[tuple[User, UserSettings]], int]:
+    def _due(self, db: Session, now: datetime) -> tuple[list[tuple[User, UserSettings]], int, datetime | None]:
         rows = db.execute(
             select(User, UserSettings)
             .join(UserSettings, UserSettings.user_id == User.id)
             .where(UserSettings.monitor_enabled.is_(True), User.status == "ACTIVE")
         ).all()
         verify = get_settings().require_verification
-        due, enabled = [], 0
+        due, enabled, next_due = [], 0, None
         for user, settings in rows:
             if verify and user.email_verified_at is None:
                 continue
             if not has_access(user, now):
                 continue  # teste acabou e não há assinatura: não busca nem avisa
             enabled += 1
-            if settings.last_run_at is None or now >= settings.last_run_at + due_interval(user, settings.interval_minutes):
+            interval = due_interval(user, settings.interval_minutes)
+            if settings.last_run_at is None or now >= settings.last_run_at + interval:
                 due.append((user, settings))
-        return due, enabled
+                at = now + interval  # depois deste ciclo, volta a ficar na hora daqui a um intervalo
+            else:
+                at = settings.last_run_at + interval
+            next_due = at if next_due is None else min(next_due, at)
+        return due, enabled, next_due
 
     def _register_backoff(self, now: datetime) -> None:
         self.backoff_seconds = min(max(60, self.backoff_seconds * 2), MAX_BACKOFF_SECONDS)
@@ -80,7 +86,7 @@ class MonitorEngine:
                 return result
             with self._session_factory() as db:
                 try:
-                    due, result.enabled = self._due(db, now)
+                    due, result.enabled, result.next_due_at = self._due(db, now)
                     result.users = len(due)
                     if not due:
                         return result
@@ -131,12 +137,19 @@ class MonitorEngine:
         """Acorda o servidor agora (ex.: alguém ligou o monitor) em vez de esperar o próximo intervalo."""
         self._wake.set()
 
-    def next_wait(self, result: TickResult) -> float:
+    def next_wait(self, result: TickResult, now: datetime | None = None) -> float:
         """Quanto esperar até o próximo ciclo. Sem ninguém monitorando, espera bem mais: assim o banco
-        (Neon) não fica acordado à toa. Ligar o monitor chama `wake()` e o ciclo roda na hora."""
+        (Neon) não fica acordado à toa. Ligar o monitor chama `wake()` e o ciclo roda na hora.
+
+        Com gente monitorando, dorme até o próximo usuário ficar na hora de buscar (em vez de conferir o
+        banco de `monitor_tick_seconds` em `monitor_tick_seconds` sem ter nada para fazer). Mudar o
+        intervalo também chama `wake()`."""
         settings = get_settings()
         if result.enabled == 0 and result.skipped is None:
             return float(settings.monitor_idle_seconds)
+        if result.skipped is None and result.next_due_at is not None:
+            until = (result.next_due_at - (now or utcnow())).total_seconds()
+            return min(float(settings.monitor_idle_seconds), max(1.0, until))
         return float(settings.monitor_tick_seconds)
 
     def maybe_prune(self, now: datetime | None = None) -> dict[str, int] | None:

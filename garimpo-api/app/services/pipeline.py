@@ -449,11 +449,35 @@ def _pending_items(db: Session, alert: Alert) -> list[Item]:
     )
 
 
+# Conferir pendências custa uma consulta por alerta. Só vale a pena quando há anúncio novo, quando um envio
+# falhou por motivo passageiro (fica para o ciclo seguinte) ou na 1ª vez de cada alerta depois de o servidor
+# ligar (algo pode ter ficado pendente antes de reiniciar).
+_pending_lock = threading.Lock()
+_retry_alerts: set[str] = set()
+_checked_alerts: set[str] = set()
+
+
+def _must_check(outcome: AlertOutcome) -> bool:
+    alert_id = outcome.alert.id
+    with _pending_lock:
+        check = bool(outcome.new) or alert_id in _retry_alerts or alert_id not in _checked_alerts
+        _checked_alerts.add(alert_id)
+        _retry_alerts.discard(alert_id)
+    return check
+
+
+def _retry_next_cycle(alert: Alert) -> None:
+    with _pending_lock:
+        _retry_alerts.add(alert.id)
+
+
 def notify_outcomes(db: Session, outcomes: list[AlertOutcome]) -> tuple[int, list[str]]:
     """Envia o que está pendente. Devolve (anúncios avisados, erros)."""
     sent, errors = 0, []
     for outcome in outcomes:
         alert = outcome.alert
+        if not _must_check(outcome):
+            continue
         # Um anúncio pode casar com 2 alertas do mesmo usuário: quem chega primeiro avisa (e o segundo
         # já o encontra registrado em Notification).
         items = _pending_items(db, alert)
@@ -472,6 +496,7 @@ def notify_outcomes(db: Session, outcomes: list[AlertOutcome]) -> tuple[int, lis
             channels.get_channel(destination.channel).send(destination, message)
         except TransientChannelError as exc:
             errors.append(str(exc))  # sem Notification: tenta de novo no próximo ciclo
+            _retry_next_cycle(alert)
             continue
         except PermanentChannelError as exc:
             destination.disconnected_at = utcnow()  # bot removido/bloqueado: o usuário precisa reconectar
@@ -481,6 +506,7 @@ def notify_outcomes(db: Session, outcomes: list[AlertOutcome]) -> tuple[int, lis
             continue
         except ChannelError as exc:
             errors.append(str(exc))
+            _retry_next_cycle(alert)
             continue
         for item in items:
             db.add(Notification(user_id=alert.user_id, item_id=item.id, ok=True))
