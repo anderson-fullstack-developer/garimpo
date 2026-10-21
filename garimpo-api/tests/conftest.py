@@ -35,6 +35,9 @@ def settings(monkeypatch):
     monkeypatch.setattr(s, "turnstile_secret", None)
     monkeypatch.setattr(s, "telegram_webhook_secret", None)  # os testes não dependem do .env de verdade
     monkeypatch.setattr(s, "telegram_bot_token", None)
+    # Os testes trocam o que a "Vinted" devolve entre um ciclo e outro, em milissegundos: a cache curta das
+    # buscas (10 s) esconderia a troca. Fica desligada; os testes da cache ligam-na de propósito.
+    monkeypatch.setattr(s, "fetch_cache_seconds", 0.0)
     return s
 
 
@@ -171,6 +174,7 @@ from decimal import Decimal  # noqa: E402
 from app.models import Destination, User, UserSettings, utcnow  # noqa: E402
 from app.services import channels as channels_module  # noqa: E402
 from app.services import monitor as monitor_module  # noqa: E402
+from app.services import pipeline as pipeline_module  # noqa: E402
 from app.services import vinted as vinted_module  # noqa: E402
 from app.services.channels import PermanentChannelError, TransientChannelError  # noqa: E402
 from app.services.monitor import MonitorEngine  # noqa: E402
@@ -235,8 +239,10 @@ def fake_source():
     source = FakeSource()
     vinted_module.set_source(source)
     monitor_module.clear_preview_cache()
+    pipeline_module.clear_fetch_cache()
     yield source
     vinted_module.set_source(None)
+    pipeline_module.clear_fetch_cache()
 
 
 @pytest.fixture

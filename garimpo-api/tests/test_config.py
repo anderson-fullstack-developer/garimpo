@@ -34,3 +34,13 @@ def test_neon_urls_are_normalized_for_psycopg3():
     assert normalize_url("postgresql://u:p@h/db?sslmode=require") == "postgresql+psycopg://u:p@h/db?sslmode=require"
     assert normalize_url("postgres://u:p@h/db") == "postgresql+psycopg://u:p@h/db"
     assert normalize_url("sqlite:///./x.db") == "sqlite:///./x.db"
+
+
+def test_search_limits_defaults_and_the_fetch_cache_never_outlasts_the_shortest_plan_interval():
+    s = Settings(_env_file=None)
+    assert s.manual_search_max_seconds == 3600  # "Buscar" ligado no máximo 1 h seguida (antes 6 h)
+    assert s.fetch_cache_seconds == 10
+    assert Settings(_env_file=None, fetch_cache_seconds=0).fetch_cache_seconds == 0  # 0 desliga
+    for bad in (-1, 10.5, 30):
+        with pytest.raises(ValueError):
+            Settings(_env_file=None, fetch_cache_seconds=bad)  # ELITE busca de 10 em 10 s

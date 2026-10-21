@@ -2,6 +2,7 @@
 
 import time
 from dataclasses import replace
+from datetime import timedelta
 
 from sqlalchemy import select
 
@@ -364,6 +365,8 @@ def test_manual_search_keeps_running_without_the_client_and_never_doubles(client
 
 def test_search_keeps_cycling_until_stopped_and_picks_up_new_listings(client, signup, fake_source, settings, monkeypatch):
     monkeypatch.setattr(settings, "manual_search_pause_seconds", 0.05)
+    # A pausa real é o intervalo do plano (15 s no PRO); aqui os ciclos precisam ser rápidos.
+    monkeypatch.setattr("app.services.manual_search.due_interval", lambda user, interval: timedelta(0))
     signup(client)
     client.post("/alerts", json=IPHONE)
     fake_source.put("iphone 12", [make_raw(1, "iPhone 12 velho", 80)])
@@ -560,3 +563,148 @@ def test_continuous_search_also_alerts_on_telegram_and_never_repeats(client, sig
 
     run_search(client)  # de novo, sem nada novo: não repete
     assert sent_titles(fake_channel) == [["iPhone 12 chegou agora"]]
+
+
+# ------------------------------------------------------------------ consumo: relógio, "Buscar", caches
+def test_id_clock_only_asks_vinted_again_every_five_minutes():
+    from app.services.idclock import REFRESH_SECONDS, IdClock
+
+    assert REFRESH_SECONDS == 300  # antes 20 s: 4 320 páginas por dia só para o relógio
+    calls = []
+
+    class Newest:
+        def fetch(self, domain, query, page=1, params=None):
+            calls.append(query)
+            return [make_raw(1_000_000 + len(calls), "qualquer", 1)]
+
+    c = IdClock()
+    assert c.refresh(Newest(), "pt", at=0) and calls == [""]
+    for at in (20, 60, 299):  # entre um acerto e outro o relógio anda com os anúncios das buscas normais
+        assert c.refresh(Newest(), "pt", at=at)
+    assert len(calls) == 1
+    c.refresh(Newest(), "pt", at=300)
+    assert len(calls) == 2
+
+
+def test_continuous_search_pauses_at_least_the_plan_interval(client, signup, session_factory, settings):
+    from app.models import User
+    from app.services import manual_search
+
+    signup(client)
+    with session_factory() as db:
+        user = db.scalar(select(User))
+        assert manual_search._cycle_pause(user, settings) == 15  # PRO: 15 s (antes eram 5 s fixos)
+        user.plan = "FREE"
+        assert manual_search._cycle_pause(user, settings) == 60
+        user.plan, user.settings.interval_minutes = "ELITE", 5
+        assert manual_search._cycle_pause(user, settings) == 300  # vale o intervalo escolhido, se for maior
+
+
+def test_continuous_search_does_not_cycle_faster_than_the_plan(client, signup, fake_source, settings, monkeypatch):
+    monkeypatch.setattr(settings, "manual_search_pause_seconds", 0.05)  # nem a pausa mínima curta acelera
+    signup(client)
+    client.post("/alerts", json=IPHONE)
+    assert client.post("/search/run", json={}).status_code == 202
+    deadline = time.time() + 10
+    while client.get("/search/status").json()["cycles"] < 1 and time.time() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.5)
+    state = client.get("/search/status").json()
+    assert state["state"] == "running" and state["cycles"] == 1  # o próximo ciclo só daqui a 15 s
+    client.post("/search/stop")  # parar não espera a pausa acabar
+    while client.get("/search/status").json()["state"] in ("running", "stopping") and time.time() < deadline:
+        time.sleep(0.02)
+    assert client.get("/search/status").json()["state"] == "done"
+
+
+def test_monitor_and_search_share_a_fetch_made_seconds_ago(client, signup, link_destination, fake_source, fake_channel, engine_, settings, monkeypatch):
+    monkeypatch.setattr(settings, "fetch_cache_seconds", 10.0)
+    setup_user(client, signup, link_destination)
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12", 80)])
+    engine_.tick(T(0))
+    assert len(fake_source.calls) == 1
+    r = run_search(client)  # o "Buscar" logo a seguir reaproveita o que o monitor acabou de trazer
+    assert r["state"] == "done" and r["analyzed"] == 1
+    assert len(fake_source.calls) == 1
+
+
+def test_fetch_cache_keeps_only_successes_expires_and_respects_the_rate_limit(settings, monkeypatch, fake_source):
+    from app.services import pipeline
+    from app.services.pipeline import SearchKey, fetch_keys
+    from tests.conftest import FakeSource
+
+    monkeypatch.setattr(settings, "fetch_cache_seconds", 10.0)
+    now = [100.0]
+    monkeypatch.setattr(pipeline, "_clock", lambda: now[0])
+    key, other, third = SearchKey("pt", "iphone 12", 1), SearchKey("pt", "outra", 1), SearchKey("pt", "mais", 1)
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12", 80)])
+
+    fetch_keys(fake_source, [key])
+    results, _ = fetch_keys(fake_source, [key])
+    assert len(fake_source.calls) == 1 and [i.vinted_id for i in results[key].items] == [1]
+    now[0] += 10  # venceu
+    fetch_keys(fake_source, [key])
+    assert len(fake_source.calls) == 2
+
+    fake_source.errors["*"] = UpstreamError("fora do ar")
+    for _ in range(2):  # erro não fica guardado: tenta de novo da próxima vez
+        results, _ = fetch_keys(fake_source, [other])
+        assert results[other].status == "error"
+    assert len(fake_source.calls) == 4
+
+    fake_source.errors["*"] = RateLimitedError("429")
+    results, limited = fetch_keys(fake_source, [third, key, other])
+    assert limited and results[third].status == "rate_limited"
+    assert results[key].status == "ok" and results[key].items  # já guardado: não gera pedido nenhum
+    assert results[other].status == "skipped"  # depois do 429 não insiste na Vinted
+    assert len(fake_source.calls) == 5
+    fake_source.errors.clear()
+    fetch_keys(fake_source, [third])  # o 429 também não ficou guardado
+    assert len(fake_source.calls) == 6
+
+    fresh_source = FakeSource()  # outra fonte não aproveita o que a anterior trouxe
+    fetch_keys(fresh_source, [key])
+    assert len(fresh_source.calls) == 1
+
+
+def test_two_simultaneous_fetches_of_the_same_search_hit_vinted_once(settings, monkeypatch, fake_source):
+    import threading
+
+    from app.services.pipeline import SearchKey, fetch_keys
+
+    monkeypatch.setattr(settings, "fetch_cache_seconds", 10.0)
+    fake_source.put("iphone 12", [make_raw(1, "iPhone 12", 80)])
+    started, gate, original = threading.Event(), threading.Event(), fake_source.fetch
+
+    def slow(*a, **k):
+        started.set()
+        gate.wait(5)
+        return original(*a, **k)
+
+    fake_source.fetch = slow
+    key, out = SearchKey("pt", "iphone 12", 1), []
+    monitor = threading.Thread(target=lambda: out.append(fetch_keys(fake_source, [key])[0]))
+    monitor.start()
+    assert started.wait(5)
+    search = threading.Thread(target=lambda: out.append(fetch_keys(fake_source, [key])[0]))
+    search.start()  # chega enquanto a 1ª ainda espera a Vinted: espera por ela em vez de repetir
+    time.sleep(0.1)
+    gate.set()
+    monitor.join(5)
+    search.join(5)
+    assert len(fake_source.calls) == 1
+    assert [len(r[key].items) for r in out] == [1, 1]
+
+
+def test_preview_cache_drops_expired_entries_and_has_a_size_limit(monkeypatch):
+    from app.services import monitor
+    from app.services.pipeline import SearchKey
+
+    monitor.clear_preview_cache()
+    monkeypatch.setattr(monitor, "_PREVIEW_MAX", 3)
+    for i in range(5):
+        monitor._remember_preview(SearchKey("pt", f"q{i}", 1), [], now=float(i))
+    assert [k.query for k in monitor._preview_cache] == ["q2", "q3", "q4"]  # as mais antigas saem
+    monitor._remember_preview(SearchKey("pt", "nova", 1), [], now=4 + monitor._PREVIEW_TTL)
+    assert [k.query for k in monitor._preview_cache] == ["nova"]  # as vencidas saem sozinhas
+    monitor.clear_preview_cache()

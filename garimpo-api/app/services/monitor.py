@@ -184,12 +184,25 @@ def run_user_search(db: Session, user: User, source: ItemSource | None = None) -
 
 # ---------------------------------------------------------------- prévia (sem gravar nada)
 _PREVIEW_TTL = 60.0
+_PREVIEW_MAX = 200  # buscas guardadas no máximo (cada uma tem só a 1ª página)
 _preview_cache: dict[SearchKey, tuple[float, list[RawItem]]] = {}
 _preview_lock = threading.Lock()
 
 
 def clear_preview_cache() -> None:
-    _preview_cache.clear()
+    with _preview_lock:
+        _preview_cache.clear()
+
+
+def _remember_preview(key: SearchKey, items: list[RawItem], now: float) -> None:
+    """Guarda a busca da prévia (com o lock). Antes nada saía daqui: tira o que expirou e, se ainda passar do
+    limite, as mais antigas (o dict mantém a ordem de inserção)."""
+    for old in [k for k, (at, _) in _preview_cache.items() if now - at >= _PREVIEW_TTL]:
+        del _preview_cache[old]
+    _preview_cache.pop(key, None)  # reinserida no fim: fica como a mais recente
+    while len(_preview_cache) >= _PREVIEW_MAX:
+        del _preview_cache[next(iter(_preview_cache))]
+    _preview_cache[key] = (now, items)
 
 
 def preview_alert(draft: object, source: ItemSource | None = None) -> tuple[list[tuple[RawItem, list[str]]], int]:
@@ -212,7 +225,7 @@ def preview_alert(draft: object, source: ItemSource | None = None) -> tuple[list
 
                 raise VintedError(res.error or "Falha ao buscar")
             items = res.items
-            _preview_cache[key] = (time.monotonic(), items)
+            _remember_preview(key, items, time.monotonic())
     rules = Rules.from_alert(draft)
     now = datetime.now(timezone.utc)
     rows = [(item, evaluate(rules, item, now)) for item in items]

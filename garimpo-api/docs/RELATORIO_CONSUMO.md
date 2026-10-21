@@ -190,3 +190,40 @@ Valores de referência: ~10 $/GB de RAM e ~20 $/vCPU por mês. São estimativas.
 ### Ficheiros analisados
 
 `app/services/monitor.py`, `manual_search.py`, `vinted.py`, `pipeline.py`, `idclock.py`, `translate.py`, `currency.py`, `maintenance.py`, `app/entitlements.py`, `app/config.py`, `app/db.py`, `app/main.py`, `app/countries.py`, `Dockerfile`, `railway.json`.
+
+---
+
+## 9. Aplicado (21/10/2026)
+
+Mudanças feitas no código, sem mudar o produto: os planos, os intervalos mínimos por plano e a opção "Europa" ficam iguais (`app/entitlements.py` e `app/countries.py` não foram alterados).
+
+| # | O quê | Onde | Antes → Agora |
+|---|---|---|---|
+| B1 | Busca extra do relógio dos anúncios | `app/services/idclock.py` | De 20 em 20 s → **de 5 em 5 min** (`REFRESH_SECONDS = 300`). Entre um acerto e outro, o relógio continua a andar com os anúncios das buscas normais (`observe`). Cerca de **-4 000 páginas por dia**. |
+| B3 | Pausa do "Buscar" contínuo | `app/services/manual_search.py` | 5 s fixos → **o intervalo do plano** (ou o intervalo escolhido pelo utilizador, se for maior), calculado com `due_interval`. PRO: 15 s; ELITE: 10 s; FREE: 1 min. O `manual_search_pause_seconds` (5 s) fica só como mínimo. |
+| B3 | Tempo máximo do "Buscar" ligado | `app/config.py` | 6 h → **1 h** (`manual_search_max_seconds = 3600`). |
+| B4 | Busca partilhada de curta duração | `app/services/pipeline.py` (`fetch_keys`), `app/config.py` | Nova opção `FETCH_CACHE_SECONDS` (por omissão **10 s**, entre 0 e 10; 0 desliga). O monitor, o "Buscar" e a pré-visualização reaproveitam o resultado de uma busca feita há menos de 10 s. Detalhes abaixo. |
+| B5 | Cache da pré-visualização | `app/services/monitor.py` | Nunca apagava nada → **remove as entradas expiradas** (60 s) e tem um **máximo de 200** buscas guardadas. |
+| B5 | Página da Vinted em memória | `app/services/vinted.py` | A página (~3,6 MB) era decodificada duas vezes e a resposta ficava viva durante a leitura → **decodificada uma vez**, a resposta é fechada e solta **antes** de ler os anúncios, e as cópias grandes do texto são soltas logo após encontrar a lista. |
+
+### Como funciona a busca partilhada (B4)
+
+- A cache é em memória, por `SearchKey` (país, termo, páginas, filtros), e protegida por um lock.
+- Só guarda resultados com estado **"ok"**. Erros e **429** nunca ficam guardados: a próxima busca tenta de novo.
+- Depois de um 429, as buscas seguintes do mesmo ciclo continuam a ser **saltadas** (não há novos pedidos à Vinted). Um resultado que já estava guardado continua a ser usado, porque não gera pedido nenhum.
+- Se duas buscas iguais chegam ao mesmo tempo (ex.: monitor e "Buscar"), a segunda **espera pela primeira** em vez de repetir o pedido.
+- O tempo de vida nunca passa do menor intervalo de plano (10 s, ELITE). Assim nenhum plano recebe um resultado mais antigo do que o seu próprio intervalo.
+- O que expira é apagado na gravação seguinte, por isso a cache só guarda as buscas dos últimos segundos.
+
+### Testes
+
+- Antes: 241 passaram, 2 ignorados. Depois: **250 passaram, 2 ignorados** (9 testes novos: config, relógio, pausa do "Buscar", cache partilhada, buscas simultâneas, cache da pré-visualização e leitura da página).
+- Ajustes em testes existentes:
+  - `tests/conftest.py`: a fixture `settings` põe `fetch_cache_seconds = 0`. Os testes trocam o que a "Vinted" devolve entre ciclos com milissegundos de diferença, e a cache de 10 s esconderia essa troca. Os testes da cache ligam-na de propósito.
+  - `test_search_keeps_cycling_until_stopped_and_picks_up_new_listings` (`test_monitor.py`) e `test_a_running_search_stops_by_itself_when_the_trial_ends` (`test_billing.py`) precisam de vários ciclos rápidos. Antes bastava baixar `manual_search_pause_seconds`. Agora a pausa real é o intervalo do plano (15 s no PRO), por isso estes testes também anulam `due_interval` no "Buscar".
+
+### Falta fazer no Railway (Grupo A, sem código)
+
+- Variáveis: `MALLOC_ARENA_MAX=2` e `MONITOR_TICK_SECONDS=15`.
+- Limites de CPU e memória do serviço (ver primeiro nas Metrics quanto usa).
+- Usage Limits e alerta de gasto na conta.

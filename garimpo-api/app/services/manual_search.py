@@ -16,6 +16,7 @@ from app.access import has_access
 from app.config import get_settings
 from app.models import User, utcnow
 from app.services.monitor import run_user_search
+from app.services.pipeline import due_interval
 
 log = logging.getLogger("garimpo.search")
 
@@ -97,6 +98,13 @@ def _finish(job: SearchJob, code: str | None = None, message: str | None = None)
         job.finished_at = utcnow()
 
 
+def _cycle_pause(user: User, settings) -> float:
+    """Pausa entre ciclos: nunca menos do que o intervalo do plano (o mesmo do monitor automático). Buscar
+    mais depressa não traz anúncios mais cedo, só repete as buscas do monitor."""
+    interval = user.settings.interval_minutes if user.settings is not None else 0.0
+    return max(settings.manual_search_pause_seconds, due_interval(user, interval).total_seconds())
+
+
 def _work(user_id: str, job: SearchJob, factory: sessionmaker) -> None:
     settings = get_settings()
     deadline = settings.manual_search_max_seconds
@@ -116,6 +124,7 @@ def _work(user_id: str, job: SearchJob, factory: sessionmaker) -> None:
                 if not has_access(user):
                     return _finish(job, "SUBSCRIPTION_REQUIRED", "Your free trial has ended. Subscribe to keep searching")
                 summary = run_user_search(db, user)
+                wait = _cycle_pause(user, settings)
             with _lock:
                 job.cycles += 1
                 job.last_cycle_at = utcnow()

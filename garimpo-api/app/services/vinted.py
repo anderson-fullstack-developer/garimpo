@@ -126,6 +126,7 @@ def parse_catalog_html(html: str, domain: str) -> list[RawItem]:
         entries, _ = json.JSONDecoder().raw_decode(blob, start + len(_MARKER))
     except (json.JSONDecodeError, ValueError) as exc:
         raise FormatChangedError(f"Could not read the listings on the page: {exc}") from exc
+    del chunks, blob  # cópias grandes da página: não precisam ficar vivas enquanto montamos os anúncios
     if not isinstance(entries, list):
         raise FormatChangedError("Unexpected format of the listing list")
 
@@ -215,14 +216,29 @@ class VintedClient:
             finally:
                 self._last = time.monotonic()
 
-        if response.status_code == 429:
+        # A página tem ~3,6 MB. Decodifica UMA vez e solta a resposta (os bytes) antes de ler os anúncios:
+        # assim o pico de memória não soma bytes + texto + o que a leitura cria.
+        status, html = response.status_code, response.text
+        _release(response)
+        del response
+        if status == 429:
             raise RateLimitedError(f"vinted.{domain} asked to slow down (429)")
-        if response.status_code in (401, 403, 503) or "cf-chl" in response.text[:2000]:
+        if status in (401, 403, 503) or "cf-chl" in html[:2000]:
             self._sessions.pop(domain, None)  # próxima vez começa uma sessão nova
-            raise BlockedError(f"vinted.{domain} blocked access ({response.status_code})")
-        if response.status_code != 200:
-            raise UpstreamError(f"vinted.{domain} answered {response.status_code}")
-        return parse_catalog_html(response.text, domain)
+            raise BlockedError(f"vinted.{domain} blocked access ({status})")
+        if status != 200:
+            raise UpstreamError(f"vinted.{domain} answered {status}")
+        return parse_catalog_html(html, domain)
+
+
+def _release(response: Any) -> None:
+    """Fecha a resposta e apaga o corpo guardado nela, caso alguém (sessão, histórico) ainda a referencie."""
+    try:
+        response.close()
+    except Exception:  # noqa: BLE001 - fechar é só uma gentileza
+        pass
+    if hasattr(response, "_content"):
+        response._content = None
 
 
 class FakeSource:

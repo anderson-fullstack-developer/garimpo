@@ -4,7 +4,12 @@ from typing import Literal
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.entitlements import entitlements_for
+
 INSECURE_SECRET = "troque-isto-em-producao"
+# A cache curta das buscas nunca pode durar mais do que o menor intervalo entre buscas de um plano (ELITE: 10 s):
+# senão quem paga pelo intervalo mais curto receberia resultados repetidos.
+MAX_FETCH_CACHE_SECONDS = round(min(entitlements_for(p).min_interval_minutes for p in ("FREE", "PRO", "ELITE")) * 60, 6)
 
 
 class Settings(BaseSettings):
@@ -42,9 +47,13 @@ class Settings(BaseSettings):
     vinted_min_interval_seconds: float = 1.0  # pausa entre chamadas à Vinted (proteção contra bloqueio)
     # Na 1ª busca de um alerta só entra o que foi publicado nesta janela; depois, só o que aparece de novo.
     first_run_window_seconds: float = 300.0
-    # Busca contínua (botão Buscar): pausa entre ciclos e limite de segurança (horas ligada sem parar).
+    # Busca contínua (botão Buscar): pausa mínima entre ciclos (na prática vale o intervalo do plano, que é
+    # maior) e limite de segurança (tempo ligada sem parar).
     manual_search_pause_seconds: float = 5.0
-    manual_search_max_seconds: float = 6 * 3600
+    manual_search_max_seconds: float = 3600
+    # Resultado de cada busca à Vinted reaproveitado por tantos segundos entre monitor, "Buscar" e prévia
+    # (0 desliga). No máximo MAX_FETCH_CACHE_SECONDS.
+    fetch_cache_seconds: float = 10.0
 
     # Monitor em segundo plano (desligado automaticamente nos testes)
     live_exchange_rates: bool = True  # consulta o câmbio (BCE); desligado nos testes
@@ -82,6 +91,13 @@ class Settings(BaseSettings):
         """`CHAVE=` vazio (ou só espaços) significa "não configurado"."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("fetch_cache_seconds")
+    @classmethod
+    def _fetch_cache_limit(cls, value: float) -> float:
+        if not 0 <= value <= MAX_FETCH_CACHE_SECONDS:
+            raise ValueError(f"FETCH_CACHE_SECONDS precisa estar entre 0 e {MAX_FETCH_CACHE_SECONDS:g}")
         return value
 
     @model_validator(mode="after")

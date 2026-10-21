@@ -74,6 +74,8 @@ def test_a_running_search_stops_by_itself_when_the_trial_ends(client, signup, se
     import time as _time
 
     monkeypatch.setattr(settings, "manual_search_pause_seconds", 0.05)
+    # A pausa real é o intervalo do plano (15 s no PRO); aqui os ciclos precisam ser rápidos.
+    monkeypatch.setattr("app.services.manual_search.due_interval", lambda user, interval: timedelta(0))
     signup(client)
     client.post("/alerts", json=ALERT)
     assert client.post("/search/run", json={}).status_code == 202

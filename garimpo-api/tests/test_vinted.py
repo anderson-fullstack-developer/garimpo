@@ -146,6 +146,52 @@ def test_network_failure_becomes_upstream_error():
         client_with(FakeSession(error=TimeoutError("lento"))).fetch("pt", "iphone 12")
 
 
+def test_client_reads_the_page_once_and_lets_it_go_before_parsing(monkeypatch):
+    import weakref
+
+    from app.services import vinted
+
+    reads = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, text):
+            self._text, self._content = text, text.encode()
+
+        @property
+        def text(self):
+            reads.append(1)  # cada leitura decodifica os ~3,6 MB da página de novo
+            return self._text
+
+        def close(self):
+            pass
+
+    class Session:
+        def __init__(self, response):
+            self.response = response
+
+        def get(self, *a, **k):
+            response, self.response = self.response, None
+            return response
+
+    response = Response(build_html(FIXTURE))
+    alive = weakref.ref(response)
+    session = Session(response)
+    del response
+    seen = {}
+    real_parse = vinted.parse_catalog_html
+
+    def spy(html, domain):
+        seen["response_alive"] = alive() is not None
+        return real_parse(html, domain)
+
+    monkeypatch.setattr(vinted, "parse_catalog_html", spy)
+    assert len(client_with(session).fetch("pt", "iphone 12")) == 8
+    assert len(reads) == 1
+    assert seen["response_alive"] is False  # a resposta já foi solta antes de ler os anúncios
+
+
 def test_client_spaces_out_requests():
     client = client_with(FakeSession(text=build_html([])), min_interval=0.2)
     start = time.monotonic()

@@ -17,7 +17,9 @@ log = logging.getLogger("garimpo.idclock")
 
 DEFAULT_RATE = 64.0  # ids por segundo (medido); refinado com as observações
 MIN_SPAN_FOR_RATE = 120.0
-REFRESH_SECONDS = 20.0
+# A busca extra só acerta o relógio de vez em quando: entre uma e outra ele avança com os anúncios das buscas
+# normais (`observe`). Antes eram 20 s (4 320 páginas por dia só para isto).
+REFRESH_SECONDS = 300.0
 
 
 class IdClock:
@@ -54,15 +56,15 @@ class IdClock:
             if estimate is None or max_id > estimate:
                 self._anchors.append((at, max_id))
 
-    def refresh(self, source: ItemSource, domain: str) -> bool:
+    def refresh(self, source: ItemSource, domain: str, at: float | None = None) -> bool:
         """Consulta o que acabou de ser publicado (busca sem termo). Devolve se há relógio utilizável."""
-        now = time.monotonic()
+        now = time.monotonic() if at is None else at
         if now - self._refreshed >= REFRESH_SECONDS or not self._anchors:
             try:
                 items = source.fetch(domain, "", 1, None)
                 if items:
-                    self.observe(max(i.vinted_id for i in items))
-                self._refreshed = time.monotonic()
+                    self.observe(max(i.vinted_id for i in items), at)
+                self._refreshed = now
             except VintedError as exc:
                 log.warning("Não consegui ajustar o relógio dos anúncios: %s", exc)
         with self._lock:

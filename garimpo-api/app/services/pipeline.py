@@ -10,6 +10,9 @@ Ideias principais:
 
 import json
 import logging
+import threading
+import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -82,28 +85,81 @@ class KeyResult:
     ended_at: datetime | None = None
 
 
+# Busca compartilhada de curta duração: o monitor, o "Buscar" e a prévia costumam pedir a MESMA busca com
+# segundos de diferença. O resultado (só os "ok") vale por `fetch_cache_seconds`; quem chega enquanto a busca
+# ainda está em andamento espera por ela (uma trava por chave) em vez de repetir o pedido à Vinted.
+_cache_lock = threading.Lock()
+_cache: dict[SearchKey, tuple[float, object, tuple[RawItem, ...]]] = {}  # chave -> (expira, fonte, anúncios)
+_key_locks: dict[SearchKey, threading.Lock] = {}
+_clock = time.monotonic  # trocado nos testes
+
+
+def clear_fetch_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+        _key_locks.clear()
+
+
+def _key_lock(key: SearchKey) -> threading.Lock:
+    with _cache_lock:
+        return _key_locks.setdefault(key, threading.Lock())
+
+
+def _cache_get(source: ItemSource, key: SearchKey, now: float) -> list[RawItem] | None:
+    with _cache_lock:
+        hit = _cache.get(key)
+        # Outra fonte (troca nos testes ou na configuração) não aproveita o que a anterior trouxe.
+        if hit and hit[0] > now and hit[1] is source:
+            return list(hit[2])
+    return None
+
+
+def _cache_put(source: ItemSource, key: SearchKey, items: list[RawItem], now: float, ttl: float) -> None:
+    with _cache_lock:
+        for old in [k for k, (expires, _, _) in _cache.items() if expires <= now]:
+            del _cache[old]  # o que expirou sai já: a cache só guarda as buscas dos últimos segundos
+        _cache[key] = (now + ttl, source, tuple(items))
+        for idle in [k for k, lock in _key_locks.items() if k not in _cache and not lock.locked()]:
+            del _key_locks[idle]  # travas de buscas que já acabaram (inclusive as que deram erro)
+
+
+def _fetch_key(source: ItemSource, key: SearchKey, result: KeyResult) -> None:
+    try:
+        for page in range(1, key.pages + 1):
+            page_items = source.fetch(key.domain, key.query, page, key.params or None)
+            result.items.extend(page_items)
+            if not page_items:
+                break
+    except RateLimitedError as exc:
+        result.status, result.error = "rate_limited", str(exc)
+    except VintedError as exc:
+        log.warning("Falha ao buscar %s: %s", key.label, exc)
+        result.status, result.error = "error", str(exc)
+
+
 def fetch_keys(source: ItemSource, keys: list[SearchKey]) -> tuple[dict[SearchKey, KeyResult], bool]:
-    """Busca cada chave uma vez. Ao tomar 429, para de insistir nas demais. Devolve (resultados, limitado)."""
+    """Busca cada chave uma vez. Ao tomar 429, para de insistir nas demais. Devolve (resultados, limitado).
+
+    O que outra busca trouxe há menos de `fetch_cache_seconds` é reaproveitado sem chamar a Vinted (mesmo
+    depois de um 429, porque não gera pedido nenhum)."""
+    ttl = get_settings().fetch_cache_seconds
     results: dict[SearchKey, KeyResult] = {}
     limited = False
     for key in dict.fromkeys(keys):  # únicas, na ordem
         result = KeyResult(key)
         results[key] = result
-        if limited:
-            result.status, result.error = "skipped", "Skipped after the request limit"
-            continue
-        try:
-            for page in range(1, key.pages + 1):
-                page_items = source.fetch(key.domain, key.query, page, key.params or None)
-                result.items.extend(page_items)
-                if not page_items:
-                    break
-        except RateLimitedError as exc:
-            limited = True
-            result.status, result.error = "rate_limited", str(exc)
-        except VintedError as exc:
-            log.warning("Falha ao buscar %s: %s", key.label, exc)
-            result.status, result.error = "error", str(exc)
+        with _key_lock(key) if ttl > 0 else nullcontext():
+            cached = _cache_get(source, key, _clock()) if ttl > 0 else None
+            if cached is not None:
+                result.items = cached
+            elif limited:
+                result.status, result.error = "skipped", "Skipped after the request limit"
+                continue
+            else:
+                _fetch_key(source, key, result)
+                limited = result.status == "rate_limited"
+                if result.status == "ok" and ttl > 0:
+                    _cache_put(source, key, result.items, _clock(), ttl)
         result.ended_at = utcnow()
     return results, limited
 
