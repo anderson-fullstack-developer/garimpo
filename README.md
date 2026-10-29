@@ -1,6 +1,6 @@
 # Garimpo — real-time Vinted alerts
 
-[![CI](https://github.com/anderson-fullstack-developer/vinted/actions/workflows/ci.yml/badge.svg)](https://github.com/anderson-fullstack-developer/vinted/actions/workflows/ci.yml)
+[![CI](https://github.com/anderson-fullstack-developer/garimpo/actions/workflows/ci.yml/badge.svg)](https://github.com/anderson-fullstack-developer/garimpo/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-FastAPI-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![License](https://img.shields.io/badge/license-MIT-green)
