@@ -1,6 +1,13 @@
 # Garimpo — real-time Vinted alerts
 
+[![CI](https://github.com/anderson-fullstack-developer/vinted/actions/workflows/ci.yml/badge.svg)](https://github.com/anderson-fullstack-developer/vinted/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-FastAPI-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 Garimpo watches new Vinted listings for you and sends the ones that match your filters straight to Telegram, seconds after they are posted.
+
+**Live demo:** [garimpo-xi-ten.vercel.app](https://garimpo-xi-ten.vercel.app)
 
 Each user creates alerts (search term, price range, country, excluded words, item condition). A background monitor groups the searches, fetches new listings, applies every alert's rules, removes duplicates and notifies the alert's Telegram destination.
 
@@ -21,7 +28,7 @@ Each user creates alerts (search term, price range, country, excluded words, ite
 - Telegram notifications through a central bot, with titles translated to Portuguese
 - Price history per listing, a "Perfect" tag when the price falls in the alert's ideal range and a "Best deal" tag on the cheapest results
 - Subscriptions with Stripe (Garimpo Pro) and a free trial
-- 200 automated tests (Pytest)
+- 200 automated tests (Pytest), run on every push by GitHub Actions together with lint, type checking and the web build
 
 ## Architecture
 
@@ -89,4 +96,8 @@ More detail in [`garimpo-api/README.md`](garimpo-api/README.md) and [`garimpo-we
 
 ## Author
 
-Built by **Anderson Neto** — [Portfolio](https://andersonneto.gt.tc) · [LinkedIn](https://linkedin.com/in/anderson-fullstack-developer)
+**Anderson Neto**, Full-Stack Developer in Lisbon. [Portfolio](https://andersonneto.gt.tc) · [LinkedIn](https://linkedin.com/in/anderson-fullstack-developer)
+
+## License
+
+[MIT](LICENSE)

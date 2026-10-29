@@ -1,63 +1,52 @@
-# Garimpo — front-end (Next.js)
+# Garimpo web (Next.js)
 
-Front-end do SaaS de alertas de anúncios. Migrado de TanStack Start (gerado pela Lovable)
-para **Next.js 16 (App Router)**. O nome do produto está em `src/config/brand.ts`.
+Front-end of the listing-alerts app, migrated from TanStack Start (generated with Lovable) to **Next.js 16 (App Router)**. The product name lives in `src/config/brand.ts`.
 
-## Rodando
+## Running
 
 ```bash
-cp .env.example .env     # NEXT_PUBLIC_USE_MOCK=true por padrão
+cp .env.example .env     # NEXT_PUBLIC_USE_MOCK=true by default
 npm install
 npm run dev              # http://localhost:3000
 npm run typecheck && npm run lint && npm run build
 ```
 
-Contas de demonstração (modo mock): `demo@garimpo.app` e `admin@garimpo.app`,
-senha `demo12345678`.
+Demo accounts (mock mode): `demo@garimpo.app` and `admin@garimpo.app`, password `demo12345678`.
 
-## Mock x backend real
+## Mock vs. real backend
 
-Toda a comunicação de dados passa por `src/lib/api/`:
+All data access goes through `src/lib/api/`:
 
-- `types.ts` — tipos e o contrato `Api`
-- `client.ts` — implementação real (`fetch`, `credentials: "include"`, erros `ApiError`)
-- `mock/` — dados fictícios, latência de 300–900 ms, falhas ocasionais, estado em `localStorage`
-- `index.ts` — escolhe mock ou real por `NEXT_PUBLIC_USE_MOCK`
+- `types.ts`: types and the `Api` contract
+- `client.ts`: real implementation (`fetch`, `credentials: "include"`, `ApiError` errors)
+- `mock/`: fake data, 300–900 ms latency, occasional failures, state in `localStorage`
+- `index.ts`: picks mock or real based on `NEXT_PUBLIC_USE_MOCK`
 
-Para o backend real: `NEXT_PUBLIC_USE_MOCK=false`, `NEXT_PUBLIC_API_URL=/api` e
-`API_PROXY_TARGET=http://localhost:3001`. O Next repassa `/api/*` ao NestJS
-(`next.config.ts`), então o navegador fala só com um domínio: **cookies first-party e sem CORS**.
+For the real backend: `NEXT_PUBLIC_USE_MOCK=false`, `NEXT_PUBLIC_API_URL=/api` and `API_PROXY_TARGET=http://localhost:8000`. Next.js forwards `/api/*` to the FastAPI backend (`next.config.ts`), so the browser only talks to one domain: **first-party cookies and no CORS**.
 
-Sessão no cliente real: em 401 a renovação (`/auth/refresh`) é única e compartilhada entre
-requisições simultâneas; endpoints de autenticação nunca disparam renovação nem redirect; o
-redirect para `/login` só acontece dentro de `/app`; e `?redirect=` aceita apenas caminhos
-internos (`src/lib/safe-redirect.ts`).
+Session handling in the real client: on a 401, a single refresh (`/auth/refresh`) is shared by concurrent requests; auth endpoints never trigger a refresh or a redirect; the redirect to `/login` only happens inside `/app`; and `?redirect=` only accepts internal paths (`src/lib/safe-redirect.ts`).
 
-Vínculo de destinos: `createLinkCode` devolve `destinationId`; o destino nasce `PENDING` e o
-assistente espera esse destino virar `LINKED`.
+Linking destinations: `createLinkCode` returns a `destinationId`; the destination starts as `PENDING` and the wizard waits for it to become `LINKED`.
 
-## Estrutura
+## Structure
 
-```
+```text
 src/
-  app/                 rotas (App Router). Cada rota: page.tsx (servidor: metadata) + view.tsx (cliente)
-    layout.tsx         html, fonte, tema sem "flash", <Providers>
-    providers.tsx      React Query, tema, auth, toasts
-    app/layout.tsx     guarda da área logada (/app/**)
+  app/                 routes (App Router). Each route: page.tsx (server: metadata) + view.tsx (client)
+    layout.tsx         html, font, theme without flash, <Providers>
+    providers.tsx      React Query, theme, auth, toasts
+    app/layout.tsx     guard for the signed-in area (/app/**)
   config/              brand.ts, plans.ts
-  i18n/pt.ts           todos os textos visíveis (pt-BR)
+  i18n/pt.ts           all visible text (Portuguese)
   lib/                 api/, entitlements.ts, highlights.ts, format.ts, safe-redirect.ts
-  hooks/useGarimpo.ts  hooks do TanStack Query
-  components/          design system (shadcn), app shell, estados, UpgradeHint
+  hooks/useGarimpo.ts  TanStack Query hooks
+  components/          design system (shadcn/ui), app shell, states, UpgradeHint
   features/            auth, alerts, feed, destinations, history
 ```
 
-Componentes nunca chamam `fetch` nem `localStorage` para dados de negócio — sempre os hooks
-de `src/hooks/useGarimpo.ts`.
+Components never call `fetch` or `localStorage` for business data; they always use the hooks in `src/hooks/useGarimpo.ts`.
 
-## Observações
+## Notes
 
-- Páginas que leem a query string (`/login`, `/reset`, `/verify-email`, feed) ficam dentro de
-  `<Suspense>` e renderizam no cliente; as demais são pré-renderizadas.
-- `react-hooks/set-state-in-effect` e `react-hooks/purity` (regras novas do React Compiler)
-  estão como *warn* por causa de padrões legítimos (buscar sessão ao montar, `matchMedia`).
+- Pages that read the query string (`/login`, `/reset`, `/verify-email`, the feed) are wrapped in `<Suspense>` and render on the client; the rest are prerendered.
+- `react-hooks/set-state-in-effect` and `react-hooks/purity` (new React Compiler rules) are set to *warn* because of legitimate patterns (loading the session on mount, `matchMedia`).

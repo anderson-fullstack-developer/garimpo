@@ -1,9 +1,8 @@
 # Garimpo API
 
-Backend do Garimpo (Python 3.12+ / FastAPI). Faz login, guarda alertas e destinos, **busca na Vinted, filtra,
-decide o que é novo e avisa no Telegram**. O front (`../garimpo-web`) conversa com esta API pelo proxy `/api`.
+Garimpo's backend (Python 3.12+ / FastAPI). It handles sign-in, stores alerts and destinations, **searches Vinted, filters the listings, decides what is new and notifies Telegram**. The front-end (`../garimpo-web`) talks to this API through the `/api` proxy.
 
-## Rodando
+## Running
 
 ```bash
 python -m venv .venv
@@ -12,141 +11,113 @@ cp .env.example .env
 .venv/Scripts/python -m uvicorn app.main:app --port 8000
 ```
 
-- Documentação interativa (só em desenvolvimento): http://localhost:8000/docs
-- Sem `DATABASE_URL` de Postgres, usa SQLite (`garimpo.db`) e cria as tabelas sozinho.
-- Sem `RESEND_API_KEY`, os e-mails (confirmação, recuperação de senha) **aparecem no log do servidor**.
-- O **monitor roda dentro do servidor** (uma thread de fundo) e verifica os usuários com o monitor ligado.
-- `VINTED_SOURCE=fake` usa anúncios de mentira (desenvolvimento sem internet); o padrão é `live`.
+- Interactive docs (development only): http://localhost:8000/docs
+- Without a Postgres `DATABASE_URL`, it uses SQLite (`garimpo.db`) and creates the tables itself.
+- Without `RESEND_API_KEY`, emails (verification, password reset) **are printed to the server log**.
+- The **monitor runs inside the server** (a background thread) and checks the users who have it switched on.
+- `VINTED_SOURCE=fake` uses fake listings (offline development); the default is `live`.
 
-Ligar o front nesta API: em `garimpo-web/.env` use `NEXT_PUBLIC_USE_MOCK=false` e
-`API_PROXY_TARGET=http://localhost:8000`. No Windows/Git Bash, defina essas variáveis com
-`MSYS_NO_PATHCONV=1` na linha de comando, senão `/api` vira um caminho do Git.
+To point the front-end at this API, set `NEXT_PUBLIC_USE_MOCK=false` and `API_PROXY_TARGET=http://localhost:8000` in `garimpo-web/.env`. On Windows with Git Bash, set these variables with `MSYS_NO_PATHCONV=1` on the command line, otherwise `/api` is turned into a Git path.
 
-## Como funciona o aviso
+## How notifications work
 
-```
-a cada ciclo (intervalo do usuário, mín. do plano)
-  └─ agrupa os alertas ativos por busca: (país, termo, páginas)  → UMA chamada à Vinted por busca
-  └─ guarda os anúncios (catálogo global) e o histórico de preço
-  └─ aplica as regras de cada alerta (termo, palavras, preço em EUR, estado)  → "matches"
-  └─ o que casou e ainda não foi avisado → traduz o título → manda ao destino do alerta (Telegram)
+```text
+every cycle (user's interval, at least the plan minimum)
+  └─ group active alerts by search: (country, term, pages)  → ONE Vinted request per search
+  └─ store the listings (global catalogue) and the price history
+  └─ apply each alert's rules (term, words, price in EUR, condition)  → "matches"
+  └─ matches not yet notified → translate the title → send to the alert's destination (Telegram)
 ```
 
-- **Baseline:** na primeira vez que um alerta é processado (ou quando o filtro muda, ou ao reativar), o que já
-  existe é registrado **sem avisar** — a menos que o usuário ligue "Notificar no primeiro ciclo".
-- **Sem duplicar:** `Match` é único por (alerta, anúncio) e `Notification` por (usuário, anúncio).
-- **Falha passageira** (Telegram lento/429): o aviso **não se perde**, é refeito no ciclo seguinte.
-  **Falha permanente** (bot removido/bloqueado): o destino vira "Desconectado" no app.
-- **429 da Vinted:** o monitor pausa (1 min, dobrando até 15 min) e volta sozinho.
-- **Preços:** os limites do alerta são em **EUR**; anúncios em outras moedas (DKK, PLN, SEK...) são
-  convertidos (câmbio do BCE via Frankfurter, atualizado a cada 12 h, com tabela de reserva).
-- **"Buscar agora"** mostra os resultados na tela e **não** manda ao Telegram (o usuário já está vendo).
+- **Baseline:** the first time an alert is processed (or when its filter changes, or when it is re-enabled), existing listings are recorded **without notifying**, unless the user turns on "Notify on first run".
+- **No duplicates:** a `Match` is unique per (alert, listing) and a `Notification` per (user, listing).
+- **Temporary failure** (slow Telegram or 429): the notification **is not lost**; it is retried in the next cycle. **Permanent failure** (bot removed or blocked): the destination becomes "Disconnected" in the app.
+- **Vinted 429:** the monitor pauses (1 minute, doubling up to 15 minutes) and resumes on its own.
+- **Prices:** alert limits are in **EUR**; listings in other currencies (DKK, PLN, SEK…) are converted using ECB rates from Frankfurter, refreshed every 12 hours, with a fallback table.
+- **"Search now"** shows the results on screen and does **not** send them to Telegram, since the user is already looking at them.
 
-## Conectar o Telegram (bot central)
+## Connecting Telegram (central bot)
 
-1. No Telegram, fale com **@BotFather** → `/newbot` → guarde o **token**.
-2. Em `.env`: `TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_BOT_USERNAME=...` (sem @) e um
-   `TELEGRAM_WEBHOOK_SECRET` longo e aleatório (`python -c "import secrets;print(secrets.token_urlsafe(32))"`).
-3. `python -m app.cli bot-info` confere o token.
-4. Com a API publicada em HTTPS: `python -m app.cli set-webhook --url https://SUA-API/webhooks/telegram`.
-   (O Telegram só entrega eventos em HTTPS; em desenvolvimento local use um túnel como ngrok/cloudflared.)
-5. No app: Configurações → Telegram → Conectar → siga o passo a passo (privado: botão "Abrir no Telegram";
-   grupo/canal: adicione o bot e envie `/link CODIGO`; em grupo, **quem envia precisa ser administrador**).
+1. In Telegram, talk to **@BotFather** → `/newbot` → keep the **token**.
+2. In `.env`: `TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_BOT_USERNAME=...` (without @) and a long random `TELEGRAM_WEBHOOK_SECRET` (`python -c "import secrets;print(secrets.token_urlsafe(32))"`).
+3. `python -m app.cli bot-info` checks the token.
+4. With the API published over HTTPS: `python -m app.cli set-webhook --url https://YOUR-API/webhooks/telegram`. Telegram only delivers events over HTTPS; for local development use a tunnel such as ngrok or cloudflared.
+5. In the app: Settings → Telegram → Connect, then follow the steps. For a private chat, use the "Open in Telegram" button. For a group or channel, add the bot and send `/link CODE`; in a group, **the sender must be an administrator**.
 
-Comandos no chat vinculado: `/status` e `/stop` (pausa o monitor).
+Commands in a linked chat: `/status` and `/stop` (pauses the monitor).
 
-## Banco de dados (Neon Postgres)
+## Database (Neon Postgres)
 
-1. Crie o projeto na Neon e copie a string de conexão **com pooler** (`...-pooler...`) para o app.
-2. Coloque em `.env` (**nunca** no Git nem em conversa): `DATABASE_URL=postgresql://...?sslmode=require`
-3. Aplique as tabelas: `.venv/Scripts/alembic upgrade head` — o Alembic troca sozinho para a conexão
-   **direta** (sem `-pooler`), como a Neon recomenda para migrações.
+1. Create the project on Neon and copy the **pooled** connection string (`...-pooler...`) for the app.
+2. Put it in `.env` (**never** in Git): `DATABASE_URL=postgresql://...?sslmode=require`
+3. Create the tables: `.venv/Scripts/alembic upgrade head`. Alembic switches to the **direct** connection (without `-pooler`) on its own, as Neon recommends for migrations.
 
-Mudou um modelo em `app/models.py`? Gere a migração (um teste falha se faltar):
-`.venv/Scripts/alembic revision --autogenerate -m "o que mudou"`.
+Changed a model in `app/models.py`? Generate the migration (a test fails if it is missing): `.venv/Scripts/alembic revision --autogenerate -m "what changed"`.
 
-**Testar em Postgres de verdade** (opcional; a suíte padrão usa SQLite): defina `TEST_DATABASE_URL` com a
-mesma string. Os testes usam **só o schema isolado `garimpo_test`** (com trava de segurança) e nunca tocam o
-`public`. Leva alguns minutos por causa da rede: `TEST_DATABASE_URL=... python -m pytest -q`.
+**Testing against real Postgres** (optional; the default suite uses SQLite): set `TEST_DATABASE_URL` to the same connection string. The tests use **only the isolated `garimpo_test` schema** (with a safety check) and never touch `public`. Because of network latency it takes a few minutes: `TEST_DATABASE_URL=... python -m pytest -q`.
 
-### Crescimento e custo
-- **Retenção** (`app/services/maintenance.py`, roda a cada 6 h dentro do monitor): apaga anúncios não vistos há
-  `RETENTION_DAYS` (30; junto vão casamentos, avisos e histórico de preço, em cascata), execuções do monitor com
-  +7 dias, tokens de e-mail/sessões vencidos e códigos de vínculo esquecidos.
-- **Menos escrita:** anúncios são gravados em lote e `last_seen_at` só é renovado a cada hora.
-- **Neon dorme:** sem ninguém com o monitor ligado, o servidor só confere o banco a cada `MONITOR_IDLE_SECONDS`
-  (240 s); ligar o monitor acorda o ciclo na hora. Com monitor ligado, o banco fica acordado (consome horas de
-  computação: confira o plano da Neon).
-- **Região:** hospede a API **na mesma região da Neon** (ex.: Frankfurt/`eu-central-1`). Cada consulta custa ~65 ms
-  daqui de Portugal até Frankfurt; na mesma região são ~1–3 ms.
+### Growth and cost
 
-## Administração
+- **Retention** (`app/services/maintenance.py`, runs every 6 hours inside the monitor): deletes listings not seen for `RETENTION_DAYS` (30, cascading to matches, notifications and price history), monitor runs older than 7 days, expired email tokens and sessions, and unused link codes.
+- **Fewer writes:** listings are written in batches and `last_seen_at` is only refreshed once an hour.
+- **Neon sleeps:** when nobody has the monitor on, the server only checks the database every `MONITOR_IDLE_SECONDS` (240 s); switching the monitor on wakes the cycle immediately. While a monitor is on, the database stays awake and uses compute hours, so check your Neon plan.
+- **Region:** host the API **in the same region as Neon** (e.g. Frankfurt / `eu-central-1`). Each query costs about 65 ms from Portugal to Frankfurt, and about 1–3 ms within the same region.
+
+## Administration
 
 ```bash
-.venv/Scripts/python -m app.cli create-admin --email voce@exemplo.com     # pede a senha
-.venv/Scripts/python -m app.cli approve --email usuario@exemplo.com        # modo APPROVAL
+.venv/Scripts/python -m app.cli create-admin --email you@example.com     # asks for the password
+.venv/Scripts/python -m app.cli approve --email user@example.com         # APPROVAL registration mode
 .venv/Scripts/python -m app.cli bot-info | set-webhook --url ...
 ```
 
-## Testes
+## Tests
 
 ```bash
-.venv/Scripts/python -m pytest -q      # 162 testes
+.venv/Scripts/python -m pytest -q      # 200 tests (259 cases with parametrisation)
 ```
-Cobrem: login/sessão, alertas, destinos, filtros (inclusive **paridade com o `looks_like_phone` do app antigo**),
-extração da página da Vinted (com dados reais salvos), monitor/baseline/duplicação, Telegram, câmbio e migrações.
 
-## Rotas
+They cover sign-in and sessions, alerts, destinations, filters (including **parity with the old app's `looks_like_phone`**), parsing of the Vinted search page (with saved real data), the monitor, baseline and deduplication, Telegram, billing, currency conversion and migrations.
 
-| Área | Rotas |
+## Routes
+
+| Area | Routes |
 |---|---|
-| Sessão | `/auth/register`, `/login`, `/logout`, `/refresh`, `/verify-email`, `/resend-verification`, `/forgot`, `/reset` |
-| Conta | `GET /me`, `POST /me/password`, `DELETE /me` |
-| Alertas | `/alerts` (CRUD), `/alerts/{id}/duplicate`, `/alerts/presets`, `POST /alerts/preview` |
-| Busca / resultados | `POST /search/run`, `GET /items` |
-| Destinos | `/channels`, `/destinations`, `/destinations/link-code`, `PATCH/DELETE`, `POST .../test`, `POST .../send` |
-| Monitor / config | `/monitor/status\|start\|stop`, `/settings` |
-| Webhook | `POST /webhooks/telegram` (exige o segredo do webhook) |
+| Session | `/auth/register`, `/login`, `/logout`, `/refresh`, `/verify-email`, `/resend-verification`, `/forgot`, `/reset` |
+| Account | `GET /me`, `POST /me/password`, `DELETE /me` |
+| Alerts | `/alerts` (CRUD), `/alerts/{id}/duplicate`, `/alerts/presets`, `POST /alerts/preview` |
+| Search / results | `POST /search/run`, `GET /items` |
+| Destinations | `/channels`, `/destinations`, `/destinations/link-code`, `PATCH/DELETE`, `POST .../test`, `POST .../send` |
+| Monitor / settings | `/monitor/status\|start\|stop`, `/settings` |
+| Webhook | `POST /webhooks/telegram` (requires the webhook secret) |
 
-Erros seguem o formato do front: `{ "code": "...", "message": "..." }`.
+Errors follow the front-end format: `{ "code": "...", "message": "..." }`.
 
-## Limitações conhecidas (leia)
+## Known limitations
 
-- **A Vinted não tem API pública.** A API JSON antiga (`/api/v2/catalog/items`) hoje responde 404; o app lê a
-  **página de busca** do site, que traz os anúncios embutidos no HTML (`app/services/vinted.py`). Isso pode
-  quebrar se a Vinted mudar a página — o monitor então registra `FormatChangedError` em vez de gerar lixo,
-  mas é preciso ajustar o extrator. Acesso automatizado pode violar os termos da Vinted: **consulte um advogado
-  antes de vender isto**.
-- **Sem data de postagem nem nome do vendedor** na busca: o app mostra "detectado há X" (momento em que viu) e
-  ordena por número do anúncio (crescente no tempo). O filtro "idade máxima" só vale quando a data existir.
-- **Custo de "Europa":** um alerta "Europa" faz **uma busca por país (~21)** por ciclo. Medido: ~68 s para o
-  "Buscar agora" e ~7 MB de página descompactada por país por ciclo. Sem bloqueio nos testes, mas em produção
-  use intervalos maiores, poucos alertas "Europa" por usuário e considere proxy.
-- **Filtro por palavras não entende todos os idiomas:** as listas de acessórios cobrem PT/ES/FR/IT/NL/DE.
-  Em "Europa" passam acessórios em outros idiomas (ex.: "ovladač", "spel"). Use preço mínimo e palavras próprias.
-- **Fila em memória:** o limitador de tentativas e o monitor rodam dentro de 1 processo. Com mais de uma
-  réplica, mova o limitador para Redis e garanta que só uma réplica execute o monitor.
+- **Vinted has no public API.** The old JSON API (`/api/v2/catalog/items`) now returns 404, so the app reads the site's **search page**, which embeds the listings in the HTML (`app/services/vinted.py`). This can break if Vinted changes the page. The monitor then logs a `FormatChangedError` instead of producing bad data, but the extractor has to be updated. Automated access may go against Vinted's terms of use.
+- **No posting date or seller name** in search results: the app shows "detected X ago" (when it first saw the listing) and sorts by listing ID, which grows over time. The "maximum age" filter only applies when a date is available.
+- **Cost of "Europe":** a "Europe" alert makes **one search per country (~21)** per cycle. Measured: about 68 s for "Search now" and about 7 MB of uncompressed page per country per cycle. No blocking was seen in testing, but in production use longer intervals, few "Europe" alerts per user, and consider a proxy.
+- **The word filter does not understand every language:** the accessory lists cover PT/ES/FR/IT/NL/DE, so in "Europe" accessories in other languages get through (e.g. "ovladač", "spel"). Use a minimum price and your own excluded words.
+- **In-memory state:** the rate limiter and the monitor run inside a single process. With more than one replica, move the limiter to Redis and make sure only one replica runs the monitor.
 
-## Segurança (resumo)
+## Security
 
-- Senhas com **argon2id**; tokens de e-mail e de renovação guardados só como hash (SHA-256).
-- Sessão em cookies **httpOnly** + SameSite=Lax. Renovação **rotativa**: reaproveitar um token antigo
-  derruba a sessão inteira (com tolerância de 10 s para duas abas renovando juntas).
-- Cadastro/recuperação respondem igual exista ou não o e-mail; login gasta o mesmo tempo com usuário
-  inexistente; 5 falhas em 15 min bloqueiam o login.
-- Todo dado é filtrado pelo usuário do token; recurso de outra pessoa responde `404`.
-- Vincular **grupo** exige administrador; um chat só pode pertencer a uma conta; o webhook exige segredo.
-- Em produção o app **recusa iniciar** com `JWT_SECRET` fraco ou `COOKIE_SECURE=false`.
-- No `.env`, **não** escreva comentário na mesma linha do valor (`CHAVE=   # texto`): use linha própria.
+- Passwords hashed with **Argon2id**; email and refresh tokens stored only as SHA-256 hashes.
+- Session in **httpOnly** cookies with SameSite=Lax. **Rotating** refresh tokens: reusing an old token revokes the whole session (with a 10-second grace period for two tabs refreshing at once).
+- Sign-up and password recovery respond the same whether or not the email exists; sign-in takes the same time for unknown users; 5 failures in 15 minutes lock sign-in.
+- All data is scoped to the token's user; another user's resource returns `404`.
+- Linking a **group** requires an administrator; a chat can belong to only one account; the webhook requires a secret.
+- In production the app **refuses to start** with a weak `JWT_SECRET` or `COOKIE_SECURE=false`.
+- In `.env`, **do not** put a comment on the same line as a value (`KEY=   # text`); use a separate line.
 
-## Ao publicar (Railway/Fly/Render)
+## Deploying (Railway / Fly / Render)
 
-- `ENVIRONMENT=production`, `JWT_SECRET` longo e aleatório, `COOKIE_SECURE=true`, `WEB_URL` e `CORS_ORIGINS` reais.
-- Atrás do proxy do Next, ligue `TRUST_PROXY=true` para o limite de tentativas contar por IP real
-  (só se a API **não** estiver exposta direto à internet: `X-Forwarded-For` pode ser falsificado).
-- Rode `alembic upgrade head` a cada publicação e registre o webhook do Telegram (`set-webhook`).
-- Precisa de processo **sempre ligado** (o monitor): não serve para funções serverless (Vercel).
+- `ENVIRONMENT=production`, a long random `JWT_SECRET`, `COOKIE_SECURE=true`, and real `WEB_URL` and `CORS_ORIGINS`.
+- Behind the Next.js proxy, set `TRUST_PROXY=true` so the rate limiter counts the real client IP. Only do this if the API is **not** exposed directly to the internet, since `X-Forwarded-For` can be spoofed.
+- Run `alembic upgrade head` on every deploy and register the Telegram webhook (`set-webhook`).
+- It needs an **always-on** process (the monitor), so it does not run on serverless functions such as Vercel.
 
-## Consumo de recursos
+## Resource usage
 
-Análise do que a API gasta no Railway (CPU, memória, buscas à Vinted) e do que dá para reduzir: [docs/RELATORIO_CONSUMO.md](docs/RELATORIO_CONSUMO.md).
+An analysis of what the API uses on Railway (CPU, memory, Vinted requests) and what can be reduced is in [docs/RELATORIO_CONSUMO.md](docs/RELATORIO_CONSUMO.md) (in Portuguese).
